@@ -4,4 +4,5 @@ export * from "./deskSwitch";
 export * from "./accessRestricted";
 export * from "./commandCentre";
 export * from "./workspaceActivity";
+export * from "./workspaceSearch";
 
