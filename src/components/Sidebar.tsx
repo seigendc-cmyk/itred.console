@@ -31,7 +31,12 @@ export type SidebarTab =
   | 'integrations'
   | 'ecosystem'
   | 'ai_analyst'
-  | 'diagnostics';
+  | 'diagnostics'
+  | 'capacity'
+  | 'staff_management'
+  | 'role_creator'
+  | 'desk_creator'
+  | 'menu_features';
 
 interface SidebarProps {
   activeTab: SidebarTab;
@@ -47,25 +52,58 @@ export default function Sidebar({
   pendingActivationsCount
 }: SidebarProps) {
   
-  // Sidebar items definition mapping directly to required elements
-  const sidebarItems: { id: SidebarTab; label: string; icon: React.ComponentType<any>; badge?: number }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'vendors', label: 'Vendor Management', icon: Users },
-    { id: 'plans', label: 'Plans & Pricing', icon: Layers },
-    { id: 'pos', label: 'POS Licensing', icon: Terminal },
-    { id: 'apps', label: 'App Licensing', icon: Cpu },
-    { id: 'activations', label: 'Activation Requests', icon: Key, badge: pendingActivationsCount },
-    { id: 'rpn', label: 'RPN Management', icon: Activity },
-    { id: 'finance', label: 'Finance', icon: Coins },
-    { id: 'notifications', label: 'Notifications', icon: Bell, badge: unreadNotificationsCount },
-    { id: 'audit', label: 'Audit Logs', icon: FileText },
-    { id: 'ai_analyst', label: 'AI Analyst Dashboard', icon: Sparkles },
-    { id: 'staff_roles', label: 'Staff Desks & Roles', icon: Users },
-    { id: 'menu_features', label: 'Menu Features Registry', icon: Layers },
-    { id: 'settings', label: 'System Settings', icon: Settings },
-    { id: 'diagnostics', label: 'SCI Diagnostics', icon: Activity },
-    { id: 'integrations', label: 'Integrations', icon: Database },
-    { id: 'ecosystem', label: 'SCI Ecosystem', icon: Boxes }
+  const sections: {
+    title: string;
+    items: { id: SidebarTab; label: string; icon: React.ComponentType<any>; badge?: number }[];
+  }[] = [
+    {
+      title: 'HOME',
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }
+      ]
+    },
+    {
+      title: 'BUSINESS',
+      items: [
+        { id: 'vendors', label: 'Vendor Management', icon: Users },
+        { id: 'activations', label: 'Activation Requests', icon: Key, badge: pendingActivationsCount },
+        { id: 'rpn', label: 'RPN Management', icon: Activity }
+      ]
+    },
+    {
+      title: 'COMMERCIAL',
+      items: [
+        { id: 'plans', label: 'Plans & Pricing', icon: Layers },
+        { id: 'capacity', label: 'Capacity', icon: Cpu },
+        { id: 'pos', label: 'POS Licensing', icon: Terminal },
+        { id: 'apps', label: 'App Licensing', icon: Cpu }
+      ]
+    },
+    {
+      title: 'INTERNAL ADMINISTRATION',
+      items: [
+        { id: 'staff_management', label: 'Staff Management', icon: Users },
+        { id: 'role_creator', label: 'Staff Roles', icon: Sparkles },
+        { id: 'desk_creator', label: 'Staff Desks', icon: Terminal },
+        { id: 'menu_features', label: 'Menu Features', icon: Layers }
+      ]
+    },
+    {
+      title: 'OPERATIONS',
+      items: [
+        { id: 'audit', label: 'Audit Logs', icon: FileText },
+        { id: 'notifications', label: 'Notifications', icon: Bell, badge: unreadNotificationsCount },
+        { id: 'finance', label: 'Finance', icon: Coins }
+      ]
+    },
+    {
+      title: 'PLATFORM',
+      items: [
+        { id: 'diagnostics', label: 'Diagnostics', icon: Activity },
+        { id: 'integrations', label: 'Integrations', icon: Database },
+        { id: 'settings', label: 'Settings', icon: Settings }
+      ]
+    }
   ];
 
   return (
@@ -82,38 +120,48 @@ export default function Sidebar({
       </div>
 
       {/* Nav Menu */}
-      <nav id="sidebar_nav" className="flex-1 overflow-y-auto py-4">
-        {sidebarItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          
-          return (
-            <button
-              id={`sidebar_tab_${item.id}`}
-              key={item.id}
-              onClick={() => onTabChange(item.id as SidebarTab)}
-              className={`w-full flex items-center justify-between px-6 py-3 text-xs uppercase tracking-wider transition-all rounded-none text-left font-medium ${
-                isActive
-                  ? 'bg-[#2A2A2A] border-l-4 border-[#FF5A00] text-white'
-                  : 'text-[#E2E8F0] opacity-60 border-l-4 border-transparent hover:opacity-100 hover:bg-[#2A2A2A]'
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#FF5A00]' : 'text-gray-400'}`} />
-                <span className="font-sans">{item.label}</span>
-              </div>
-              
-              {/* Conditional Badges */}
-              {item.badge !== undefined && item.badge > 0 && (
-                <span className={`px-1.5 py-0.5 text-[9px] font-mono font-bold ${
-                  isActive ? 'bg-[#FF5A00] text-white' : 'bg-[#FF5A00]/20 text-[#FF5A00]'
-                }`}>
-                  {item.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <nav id="sidebar_nav" className="flex-1 overflow-y-auto py-4 space-y-4">
+        {sections.map((section) => (
+          <div key={section.title} className="space-y-1">
+            <div className="px-6 text-[9px] uppercase tracking-widest text-[#FF5A00] font-black font-mono opacity-80">
+              {section.title}
+            </div>
+            
+            <div className="space-y-0.5">
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                
+                return (
+                  <button
+                    id={`sidebar_tab_${item.id}`}
+                    key={item.id}
+                    onClick={() => onTabChange(item.id)}
+                    className={`w-full flex items-center justify-between px-6 py-2 text-xs uppercase tracking-wider transition-all rounded-none text-left font-medium ${
+                      isActive
+                        ? 'bg-[#2A2A2A] border-l-4 border-[#FF5A00] text-white font-bold'
+                        : 'text-[#E2E8F0] opacity-60 border-l-4 border-transparent hover:opacity-100 hover:bg-[#2A2A2A]'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#FF5A00]' : 'text-gray-400'}`} />
+                      <span className="font-sans text-[11px]">{item.label}</span>
+                    </div>
+                    
+                    {/* Conditional Badges */}
+                    {item.badge !== undefined && item.badge > 0 && (
+                      <span className={`px-1.5 py-0.5 text-[9px] font-mono font-bold ${
+                        isActive ? 'bg-[#FF5A00] text-white' : 'bg-[#FF5A00]/20 text-[#FF5A00]'
+                      }`}>
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* System Status Footer */}

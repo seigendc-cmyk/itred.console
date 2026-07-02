@@ -81,6 +81,10 @@ export interface RPNAgent {
   commissionRate?: number;
   acquisitionCount?: number;
   notes?: string;
+  assignedArea?: string;
+  monthlyTarget?: string;
+  commissionModel?: string;
+  performance?: 'Exceeding' | 'On Track' | 'Needs Attention';
 }
 
 export interface AuditLog {

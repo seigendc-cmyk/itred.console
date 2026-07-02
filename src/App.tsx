@@ -22,8 +22,11 @@ import FinanceView from './components/FinanceView';
 import EcosystemDashboardView from './components/EcosystemDashboardView';
 import AIAnalystView from './components/AIAnalystView';
 import SCIDiagnosticsView from './components/SCIDiagnosticsView';
-import MenuFeaturesView from './components/MenuFeaturesView';
-import StaffManagementView from './components/StaffManagementView';
+import MenuFeaturesView from './components/internal/MenuFeaturesView';
+import StaffManagementView from './components/internal/StaffManagementView';
+import StaffRoleCreatorView from './components/internal/StaffRoleCreatorView';
+import StaffDeskCreatorView from './components/internal/StaffDeskCreatorView';
+import CapacityView from './components/internal/CapacityView';
 import ErrorBoundary from './components/ErrorBoundary';
 import POSLicenseGuard from './guards/POSLicenseGuard';
 import {
@@ -68,6 +71,28 @@ import {
   StaffDesk,
   MenuFeature
 } from './types';
+
+import {
+  SCIInternalStaff,
+  SCIStaffRole,
+  SCIStaffDesk,
+  SCIMenuFeature,
+  SCIStaffSession,
+  INITIAL_MENU_FEATURES,
+  INITIAL_STAFF_ROLES,
+  INITIAL_STAFF_DESKS,
+  INITIAL_INTERNAL_STAFF,
+  getInternalStaff,
+  saveInternalStaff,
+  getStaffRoles,
+  saveStaffRoles,
+  getStaffDesks,
+  saveStaffDesks,
+  getMenuFeatures,
+  saveMenuFeatures,
+  createStaffSession,
+  getStaffSession
+} from './internal';
 
 import {
   CreateVendorWizard,
@@ -124,8 +149,11 @@ export default function App() {
               <Route path="/ecosystem" element={<EcosystemRoute />} />
               <Route path="/ai_analyst" element={<AIAnalystRoute />} />
               <Route path="/diagnostics" element={<DiagnosticsRoute />} />
-              <Route path="/staff_roles" element={<StaffRolesRoute />} />
-              <Route path="/menu_features" element={<MenuFeaturesRoute />} />
+              <Route path="/staff" element={<StaffManagementRoute />} />
+              <Route path="/roles" element={<StaffRolesRoute />} />
+              <Route path="/desks" element={<StaffDesksRoute />} />
+              <Route path="/menu-features" element={<MenuFeaturesRoute />} />
+              <Route path="/capacity" element={<CapacityRoute />} />
 
               {/* Special Guided Vendor Lifecycle Routes */}
               <Route path="/lifecycle/create-vendor" element={<CreateVendorRoute />} />
@@ -238,30 +266,46 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
   const [systemConfig, setSystemConfig] = useState<SystemConfig>(INITIAL_SYSTEM_CONFIG);
   const [integrations, setIntegrations] = useState<IntegrationService[]>(INITIAL_INTEGRATIONS);
 
-  const [menuFeatures, setMenuFeatures] = useState<MenuFeature[]>(() => {
-    const saved = localStorage.getItem('sgn_menu_features');
-    return saved ? JSON.parse(saved) : INITIAL_MENU_FEATURES;
+  const [internalStaff, setInternalStaff] = useState<SCIInternalStaff[]>(() => {
+    return getInternalStaff(INITIAL_INTERNAL_STAFF);
   });
-  const [staffDesks, setStaffDesks] = useState<StaffDesk[]>(() => {
-    const saved = localStorage.getItem('sgn_staff_desks');
-    return saved ? JSON.parse(saved) : INITIAL_STAFF_DESKS;
+  const [staffRoles, setStaffRoles] = useState<SCIStaffRole[]>(() => {
+    return getStaffRoles(INITIAL_STAFF_ROLES);
   });
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>(() => {
-    const saved = localStorage.getItem('sgn_staff_members');
-    return saved ? JSON.parse(saved) : INITIAL_STAFF_MEMBERS;
+  const [staffDesks, setStaffDesks] = useState<SCIStaffDesk[]>(() => {
+    return getStaffDesks(INITIAL_STAFF_DESKS);
+  });
+  const [internalMenuFeatures, setInternalMenuFeatures] = useState<SCIMenuFeature[]>(() => {
+    return getMenuFeatures(INITIAL_MENU_FEATURES);
+  });
+  const [activeStaffSession, setActiveStaffSession] = useState<SCIStaffSession | null>(() => {
+    let sess = getStaffSession();
+    if (!sess && INITIAL_INTERNAL_STAFF.length > 0) {
+      const sa = INITIAL_INTERNAL_STAFF[0];
+      const saRole = INITIAL_STAFF_ROLES.find(r => r.roleId === sa.roleId);
+      const saDesk = INITIAL_STAFF_DESKS.find(d => d.deskId === sa.defaultDeskId);
+      if (sa && saRole && saDesk) {
+        sess = createStaffSession({ staff: sa, role: saRole, desk: saDesk });
+      }
+    }
+    return sess;
   });
 
   React.useEffect(() => {
-    localStorage.setItem('sgn_menu_features', JSON.stringify(menuFeatures));
-  }, [menuFeatures]);
+    saveInternalStaff(internalStaff);
+  }, [internalStaff]);
 
   React.useEffect(() => {
-    localStorage.setItem('sgn_staff_desks', JSON.stringify(staffDesks));
+    saveStaffRoles(staffRoles);
+  }, [staffRoles]);
+
+  React.useEffect(() => {
+    saveStaffDesks(staffDesks);
   }, [staffDesks]);
 
   React.useEffect(() => {
-    localStorage.setItem('sgn_staff_members', JSON.stringify(staffMembers));
-  }, [staffMembers]);
+    saveMenuFeatures(internalMenuFeatures);
+  }, [internalMenuFeatures]);
 
   // Automatically toggle demo mode when demo vendor is active
   React.useEffect(() => {
@@ -893,9 +937,10 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     setNotifications(INITIAL_NOTIFICATIONS);
     setSystemConfig(INITIAL_SYSTEM_CONFIG);
     setIntegrations(INITIAL_INTEGRATIONS);
-    setMenuFeatures(INITIAL_MENU_FEATURES);
+    setInternalMenuFeatures(INITIAL_MENU_FEATURES);
     setStaffDesks(INITIAL_STAFF_DESKS);
-    setStaffMembers(INITIAL_STAFF_MEMBERS);
+    setInternalStaff(INITIAL_INTERNAL_STAFF);
+    setStaffRoles(INITIAL_STAFF_ROLES);
     localStorage.clear();
   };
 
@@ -958,12 +1003,16 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     selectedAuditActor,
     setSelectedAuditActor,
     
-    staffMembers,
-    setStaffMembers,
+    internalStaff,
+    setInternalStaff,
+    staffRoles,
+    setStaffRoles,
     staffDesks,
     setStaffDesks,
-    menuFeatures,
-    setMenuFeatures,
+    internalMenuFeatures,
+    setInternalMenuFeatures,
+    activeStaffSession,
+    setActiveStaffSession,
 
     // Calculations
     computedStats,
@@ -1084,6 +1133,10 @@ function RequireAuthLayout() {
     const path = location.pathname.substring(1);
     if (path.startsWith('lifecycle')) return 'dashboard'; // Highlight dashboard during lifecycles
     if (path === 'dashboard' || path === '') return 'dashboard';
+    if (path === 'staff') return 'staff_management';
+    if (path === 'roles') return 'role_creator';
+    if (path === 'desks') return 'desk_creator';
+    if (path === 'menu-features') return 'menu_features';
     return path as SidebarTab;
   }, [location]);
 
@@ -1110,7 +1163,17 @@ function RequireAuthLayout() {
       <Sidebar
         activeTab={activeTab}
         onTabChange={(tab) => {
-          navigate(`/${tab}`);
+          if (tab === 'staff_management') {
+            navigate('/staff');
+          } else if (tab === 'role_creator') {
+            navigate('/roles');
+          } else if (tab === 'desk_creator') {
+            navigate('/desks');
+          } else if (tab === 'menu_features') {
+            navigate('/menu-features');
+          } else {
+            navigate(`/${tab}`);
+          }
           setSearchQuery(''); // Reset search upon navigation
         }}
         unreadNotificationsCount={notifications.filter((n: any) => !n.read).length}
@@ -1360,40 +1423,96 @@ function DiagnosticsRoute() {
   return <SCIDiagnosticsView />;
 }
 
-function StaffRolesRoute() {
-  const { staffMembers, setStaffMembers, staffDesks, setStaffDesks, menuFeatures, currentAdmin } = useLifecycle();
+function StaffManagementRoute() {
+  const { 
+    internalStaff, 
+    setInternalStaff, 
+    staffRoles, 
+    staffDesks, 
+    internalMenuFeatures,
+    activeStaffSession, 
+    setActiveStaffSession 
+  } = useLifecycle();
+
+  const currentStaffCanCreateEmployee = useMemo(() => {
+    if (!activeStaffSession) return false;
+    const staff = internalStaff.find(s => s.staffId === activeStaffSession.staffId);
+    if (!staff) return false;
+    const role = staffRoles.find(r => r.roleId === staff.roleId);
+    return staff.canCreateEmployee || (role ? role.canCreateEmployee : false);
+  }, [activeStaffSession, internalStaff, staffRoles]);
+
+  const handleSimulateSession = (staffId: string) => {
+    const staff = internalStaff.find(s => s.staffId === staffId);
+    if (!staff) return;
+    const role = staffRoles.find(r => r.roleId === staff.roleId);
+    const desk = staffDesks.find(d => d.deskId === staff.defaultDeskId) || staffDesks[0];
+    if (staff && role && desk) {
+      const session = createStaffSession({ staff, role, desk });
+      setActiveStaffSession(session);
+    }
+  };
+
   return (
     <StaffManagementView
-      staffMembers={staffMembers}
-      onUpdateStaffMembers={setStaffMembers}
+      internalStaff={internalStaff}
+      onUpdateInternalStaff={setInternalStaff}
+      staffRoles={staffRoles}
+      staffDesks={staffDesks}
+      menuFeatures={internalMenuFeatures}
+      activeStaffSession={activeStaffSession}
+      onUpdateStaffSession={setActiveStaffSession}
+      currentStaffCanCreateEmployee={currentStaffCanCreateEmployee}
+      onSimulateSession={handleSimulateSession}
+    />
+  );
+}
+
+function StaffRolesRoute() {
+  const { staffRoles, setStaffRoles, internalMenuFeatures, currentAdmin } = useLifecycle();
+  return (
+    <StaffRoleCreatorView
+      staffRoles={staffRoles}
+      onUpdateStaffRoles={setStaffRoles}
+      menuFeatures={internalMenuFeatures}
+      currentAdmin={currentAdmin}
+    />
+  );
+}
+
+function StaffDesksRoute() {
+  const { staffDesks, setStaffDesks, internalStaff, internalMenuFeatures, currentAdmin } = useLifecycle();
+  return (
+    <StaffDeskCreatorView
       staffDesks={staffDesks}
       onUpdateStaffDesks={setStaffDesks}
-      menuFeatures={menuFeatures}
+      internalStaff={internalStaff}
+      menuFeatures={internalMenuFeatures}
       currentAdmin={currentAdmin}
     />
   );
 }
 
 function MenuFeaturesRoute() {
-  const { menuFeatures, setMenuFeatures, currentAdmin } = useLifecycle();
-  
-  const handleAddMenuFeature = (feat: MenuFeature) => {
-    setMenuFeatures((prev: MenuFeature[]) => [feat, ...prev]);
-  };
-  const handleUpdateMenuFeature = (feat: MenuFeature) => {
-    setMenuFeatures((prev: MenuFeature[]) => prev.map(f => f.id === feat.id ? feat : f));
-  };
-  const handleDeleteMenuFeature = (id: string) => {
-    setMenuFeatures((prev: MenuFeature[]) => prev.filter(f => f.id !== id));
-  };
-
+  const { internalMenuFeatures, setInternalMenuFeatures, staffRoles, staffDesks, currentAdmin } = useLifecycle();
   return (
     <MenuFeaturesView
-      menuFeatures={menuFeatures}
-      onAddMenuFeature={handleAddMenuFeature}
-      onUpdateMenuFeature={handleUpdateMenuFeature}
-      onDeleteMenuFeature={handleDeleteMenuFeature}
+      menuFeatures={internalMenuFeatures}
+      onUpdateMenuFeatures={setInternalMenuFeatures}
+      staffRoles={staffRoles}
+      staffDesks={staffDesks}
       currentAdmin={currentAdmin}
+    />
+  );
+}
+
+function CapacityRoute() {
+  const { plans, posLicenses, rpnAgents } = useLifecycle();
+  return (
+    <CapacityView
+      plans={plans}
+      posLicenses={posLicenses}
+      rpnAgents={rpnAgents}
     />
   );
 }

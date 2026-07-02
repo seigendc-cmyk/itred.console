@@ -46,6 +46,10 @@ export default function RPNManagementView({
   const [formAgentType, setFormAgentType] = useState<'relay' | 'acquisition_agent'>('relay');
   const [formCommission, setFormCommission] = useState(10);
   const [formNotes, setFormNotes] = useState('');
+  const [formAssignedArea, setFormAssignedArea] = useState('');
+  const [formMonthlyTarget, setFormMonthlyTarget] = useState('10 Vendors');
+  const [formCommissionModel, setFormCommissionModel] = useState('10% Commission');
+  const [formPerformance, setFormPerformance] = useState<'Exceeding' | 'On Track' | 'Needs Attention'>('On Track');
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,6 +70,10 @@ export default function RPNManagementView({
       commissionRate: formAgentType === 'acquisition_agent' ? formCommission : undefined,
       acquisitionCount: formAgentType === 'acquisition_agent' ? 0 : undefined,
       notes: formAgentType === 'acquisition_agent' ? formNotes : undefined,
+      assignedArea: formAgentType === 'acquisition_agent' ? formAssignedArea : undefined,
+      monthlyTarget: formAgentType === 'acquisition_agent' ? formMonthlyTarget : undefined,
+      commissionModel: formAgentType === 'acquisition_agent' ? formCommissionModel : undefined,
+      performance: formAgentType === 'acquisition_agent' ? formPerformance : undefined,
       linkedVendorIds: []
     };
 
@@ -76,6 +84,10 @@ export default function RPNManagementView({
     // Reset Form
     setFormName('');
     setFormNotes('');
+    setFormAssignedArea('');
+    setFormMonthlyTarget('10 Vendors');
+    setFormCommissionModel('10% Commission');
+    setFormPerformance('On Track');
     setIsAddDrawerOpen(false);
   };
   
@@ -245,8 +257,24 @@ export default function RPNManagementView({
                         {agent.region} • CURRENT ACTIVE THROUGHPUT: <strong className="text-gray-700 font-bold">{agent.throughput}</strong>
                       </div>
                       {agent.agentType === 'acquisition_agent' && (
-                        <div className="text-[10px] text-[#FF5A00] font-sans font-bold mt-1 uppercase">
-                          Commission Rate: {agent.commissionRate || 10}% • Hired Handoffs: {agent.acquisitionCount || 0} Vendors Acquired
+                        <div className="text-[10px] bg-orange-50/50 border border-orange-200/40 p-2.5 mt-2 space-y-1 text-[#1A1A1A] font-mono leading-relaxed">
+                          <div className="grid grid-cols-2 gap-2 text-[9px] uppercase font-bold text-gray-500">
+                            <div>Region: <strong className="text-gray-800 font-black">{agent.region}</strong></div>
+                            <div>Assigned Area: <strong className="text-gray-800 font-black">{agent.assignedArea || 'N/A'}</strong></div>
+                            <div>Monthly Target: <strong className="text-gray-800 font-black">{agent.monthlyTarget || 'N/A'}</strong></div>
+                            <div>Commission Model: <strong className="text-gray-800 font-black">{agent.commissionModel || 'N/A'}</strong></div>
+                            <div>Active Vendors: <strong className="text-gray-800 font-black">{getAttachedVendorsForRpn(agent.id, agent).length}</strong></div>
+                            <div>Performance: <span className={`font-black uppercase ${
+                              agent.performance === 'Exceeding' ? 'text-green-600' :
+                              agent.performance === 'Needs Attention' ? 'text-red-650' :
+                              'text-amber-600'
+                            }`}>{agent.performance || 'On Track'}</span></div>
+                          </div>
+                          {agent.notes && (
+                            <div className="text-[9px] text-gray-450 mt-1 font-sans font-normal italic lowercase">
+                              Notes: {agent.notes}
+                            </div>
+                          )}
                         </div>
                       )}
                       <div className="mt-1.5">
@@ -662,6 +690,51 @@ export default function RPNManagementView({
                         onChange={(e) => setFormCommission(parseInt(e.target.value) || 10)}
                         className="w-full bg-white border border-[#D1D1CF] p-2 text-xs focus:outline-none"
                       />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-gray-500 uppercase text-[9px] block font-bold">Assigned Area</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Cape Town Metro"
+                        value={formAssignedArea}
+                        onChange={(e) => setFormAssignedArea(e.target.value)}
+                        className="w-full bg-white border border-[#D1D1CF] p-2 text-xs focus:outline-none uppercase font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-gray-500 uppercase text-[9px] block font-bold">Monthly Target</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. 15 Vendors"
+                        value={formMonthlyTarget}
+                        onChange={(e) => setFormMonthlyTarget(e.target.value)}
+                        className="w-full bg-white border border-[#D1D1CF] p-2 text-xs focus:outline-none uppercase font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[#FF5A00] uppercase text-[9px] block font-bold">Commission Model</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. 10% Recurring + $50 Bonus"
+                        value={formCommissionModel}
+                        onChange={(e) => setFormCommissionModel(e.target.value)}
+                        className="w-full bg-white border border-[#D1D1CF] p-2 text-xs focus:outline-none uppercase font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-gray-500 uppercase text-[9px] block font-bold">Performance Indicator</label>
+                      <select
+                        value={formPerformance}
+                        onChange={(e) => setFormPerformance(e.target.value as any)}
+                        className="w-full bg-white border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none rounded-none font-bold"
+                      >
+                        <option value="Exceeding">Exceeding Target</option>
+                        <option value="On Track">On Track</option>
+                        <option value="Needs Attention">Needs Attention</option>
+                      </select>
                     </div>
                     <div className="space-y-1">
                       <label className="text-gray-500 uppercase text-[9px] block font-bold">Hiring & Contract Notes</label>
