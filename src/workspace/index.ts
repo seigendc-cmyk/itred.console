@@ -6,4 +6,5 @@ export * from "./commandCentre";
 export * from "./workspaceActivity";
 export * from "./workspaceSearch";
 export * from "./workspaceNotifications";
+export * from "./workspaceEnvironment";
 
