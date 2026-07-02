@@ -1,3 +1,4 @@
+import { printSCIDiagnostics, runSCIDiagnostics } from './diagnostics';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
@@ -8,3 +9,18 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+declare global {
+  interface Window {
+    SCI?: {
+      runDiagnostics: typeof runSCIDiagnostics;
+      printDiagnostics: typeof printSCIDiagnostics;
+    };
+  }
+}
+
+window.SCI = {
+  runDiagnostics: runSCIDiagnostics,
+  printDiagnostics: printSCIDiagnostics,
+};
+
