@@ -21,6 +21,7 @@ import RPNManagementView from './components/RPNManagementView';
 import FinanceView from './components/FinanceView';
 import EcosystemDashboardView from './components/EcosystemDashboardView';
 import AIAnalystView from './components/AIAnalystView';
+import SCIDiagnosticsView from './components/SCIDiagnosticsView';
 import ErrorBoundary from './components/ErrorBoundary';
 import POSLicenseGuard from './guards/POSLicenseGuard';
 import {
@@ -114,6 +115,7 @@ export default function App() {
               <Route path="/integrations" element={<IntegrationsRoute />} />
               <Route path="/ecosystem" element={<EcosystemRoute />} />
               <Route path="/ai_analyst" element={<AIAnalystRoute />} />
+              <Route path="/diagnostics" element={<DiagnosticsRoute />} />
 
               {/* Special Guided Vendor Lifecycle Routes */}
               <Route path="/lifecycle/create-vendor" element={<CreateVendorRoute />} />
@@ -1307,6 +1309,10 @@ function EcosystemRoute() {
 
 function AIAnalystRoute() {
   return <AIAnalystView />;
+}
+
+function DiagnosticsRoute() {
+  return <SCIDiagnosticsView />;
 }
 
 /* ==========================================================================

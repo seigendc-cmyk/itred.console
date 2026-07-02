@@ -30,7 +30,8 @@ export type SidebarTab =
   | 'settings'
   | 'integrations'
   | 'ecosystem'
-  | 'ai_analyst';
+  | 'ai_analyst'
+  | 'diagnostics';
 
 interface SidebarProps {
   activeTab: SidebarTab;
@@ -60,6 +61,7 @@ export default function Sidebar({
     { id: 'audit', label: 'Audit Logs', icon: FileText },
     { id: 'ai_analyst', label: 'AI Analyst Dashboard', icon: Sparkles },
     { id: 'settings', label: 'System Settings', icon: Settings },
+    { id: 'diagnostics', label: 'SCI Diagnostics', icon: Activity },
     { id: 'integrations', label: 'Integrations', icon: Database },
     { id: 'ecosystem', label: 'SCI Ecosystem', icon: Boxes }
   ];
