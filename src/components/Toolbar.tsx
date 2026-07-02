@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Bell, User, ChevronDown, LogOut, ShieldAlert } from 'lucide-react';
 import { AppNotification } from '../types';
-import { SCIStaffSession } from '../internal/staffTypes';
+import { SCIStaffSession, SCIInternalStaff, SCIStaffDesk, SCIStaffRole } from '../internal/staffTypes';
 
 interface ToolbarProps {
   activeStaffSession: SCIStaffSession | null;
@@ -11,6 +11,11 @@ interface ToolbarProps {
   onSearch: (query: string) => void;
   searchQuery: string;
   isDemoActive?: boolean;
+  activeWorkspaceLabel: string;
+  internalStaff: SCIInternalStaff[];
+  staffRoles: SCIStaffRole[];
+  staffDesks: SCIStaffDesk[];
+  onDeskSwitch: (deskId: string) => void;
 }
 
 export default function Toolbar({
@@ -20,18 +25,45 @@ export default function Toolbar({
   onNavigateToNotifications,
   onSearch,
   searchQuery,
-  isDemoActive = false
+  isDemoActive = false,
+  activeWorkspaceLabel,
+  internalStaff,
+  staffRoles,
+  staffDesks,
+  onDeskSwitch
 }: ToolbarProps) {
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  // Resolve assigned desks for active operator profile
+  const activeStaff = React.useMemo(() => {
+    if (!activeStaffSession) return null;
+    return internalStaff.find(s => s.staffId === activeStaffSession.staffId) || null;
+  }, [internalStaff, activeStaffSession]);
+
+  const assignedDesks = React.useMemo(() => {
+    if (!activeStaff) return [];
+    return staffDesks.filter(d => activeStaff.assignedDeskIds.includes(d.deskId));
+  }, [staffDesks, activeStaff]);
+
   return (
-    <header id="toolbar_header" className="h-16 border-b border-[#D1D1CF] bg-white flex items-center justify-between px-8 relative z-10 shrink-0 font-sans">
+    <header id="toolbar_header" className="h-16 border-b border-[#D1D1CF] bg-white flex items-center justify-between px-8 relative z-10 shrink-0 font-sans select-none">
       
+      {/* Breadcrumb section on far left */}
+      <div className="flex items-center space-x-3 shrink-0">
+        <span className="font-mono text-xs font-black uppercase text-[#1A1A1A] tracking-widest">
+          SCI Control Centre
+        </span>
+        <span className="text-gray-300 text-sm font-light">/</span>
+        <span className="bg-orange-50 text-[#FF5A00] border border-orange-200 text-[10px] font-mono font-bold px-2 py-0.5 uppercase tracking-wider">
+          {activeWorkspaceLabel}
+        </span>
+      </div>
+
       {/* Search Input Section */}
-      <div id="search_container" className="flex items-center w-80 relative">
+      <div id="search_container" className="flex items-center w-64 relative mx-4">
         <Search className="absolute left-3 w-4 h-4 text-gray-400" />
         <input
           id="search_input"
@@ -53,10 +85,10 @@ export default function Toolbar({
       </div>
 
       {/* Center/Right controls */}
-      <div id="toolbar_actions" className="flex items-center space-x-6">
+      <div id="toolbar_actions" className="flex items-center space-x-5">
         
         {/* Global Storage Mode Indicator */}
-        <div id="storage_mode_indicator" className="flex items-center space-x-2 border-r border-[#D1D1CF] pr-6 font-mono text-[10px]">
+        <div id="storage_mode_indicator" className="flex items-center space-x-2 border-r border-[#D1D1CF] pr-5 font-mono text-[10px]">
           <span className="text-gray-500 uppercase tracking-wider">Storage Mode:</span>
           <div className="flex border border-[#D1D1CF] p-0.5 bg-[#F4F4F1] rounded-none">
             <div className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-none ${
@@ -76,11 +108,22 @@ export default function Toolbar({
           </div>
         </div>
         
-        {/* Active Console/Desk Indicator */}
-        {activeStaffSession && (
+        {/* Active Console/Desk Dropdown Switcher */}
+        {activeStaffSession && assignedDesks.length > 0 && (
           <div className="flex items-center space-x-1.5 bg-orange-50 border border-orange-250 px-3 py-1 font-mono text-[10px] text-[#FF5A00] font-black uppercase">
             <span className="w-1.5 h-1.5 bg-[#FF5A00] rounded-none animate-pulse shrink-0" />
-            <span>CONSOLE DESK: {activeStaffSession.activeDeskId}</span>
+            <span className="text-gray-500">DESK:</span>
+            <select
+              value={activeStaffSession.activeDeskId}
+              onChange={(e) => onDeskSwitch(e.target.value)}
+              className="bg-transparent border-none text-[#FF5A00] font-black focus:outline-none uppercase cursor-pointer text-[10px] p-0 font-mono"
+            >
+              {assignedDesks.map(d => (
+                <option key={d.deskId} value={d.deskId} className="bg-white text-gray-800 font-sans">
+                  {d.deskName} ({d.deskCode})
+                </option>
+              ))}
+            </select>
           </div>
         )}
 
@@ -97,6 +140,13 @@ export default function Toolbar({
             <User className="w-3.5 h-3.5 text-[#FF5A00]" />
             <span className="uppercase tracking-wider font-mono">{activeStaffSession?.fullName || 'Anonymous'}</span>
             <span className="text-[9px] bg-gray-200 text-gray-700 px-1 font-mono font-semibold uppercase">{activeStaffSession?.roleId.replace('role_', '') || 'guest'}</span>
+            
+            {activeStaffSession?.dashboardType && (
+              <span className="text-[9px] bg-orange-100 text-[#FF5A00] px-1 font-mono font-extrabold uppercase shrink-0">
+                {activeStaffSession.dashboardType}
+              </span>
+            )}
+
             <ChevronDown className="w-3 h-3 text-gray-500" />
           </button>
 
@@ -119,8 +169,12 @@ export default function Toolbar({
                   <span className="text-gray-800">{activeStaffSession?.activeDeskId}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span>Dashboard Type:</span>
+                  <span className="text-orange-500 uppercase">{activeStaffSession?.dashboardType}</span>
+                </div>
+                <div className="flex justify-between">
                   <span>Effective Paths:</span>
-                  <span className="text-gray-850 font-black">{activeStaffSession?.grantedMenuFeatureIds.length} Nodes</span>
+                  <span className="text-gray-855 font-black">{activeStaffSession?.grantedMenuFeatureIds.length} Nodes</span>
                 </div>
               </div>
               <button

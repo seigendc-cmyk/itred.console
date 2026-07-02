@@ -8,6 +8,7 @@ import {
   useLocation, 
   useNavigate 
 } from 'react-router-dom';
+import { ShieldAlert } from 'lucide-react';
 
 import Sidebar, { SidebarTab } from './components/Sidebar';
 import Toolbar from './components/Toolbar';
@@ -90,6 +91,15 @@ import {
   createStaffSession,
   getStaffSession
 } from './internal';
+
+import {
+  SCIWorkspaceCode,
+  SCI_WORKSPACES,
+  resolveWorkspaceAccess,
+  switchStaffDesk,
+  buildAccessRestrictedViewModel
+} from './workspace';
+import WorkspaceRail from './components/WorkspaceRail';
 
 import {
   CreateVendorWizard,
@@ -1116,7 +1126,10 @@ function RequireAuthLayout() {
     vendors,
     isDemoActive,
     activeStaffSession,
-    setActiveStaffSession
+    setActiveStaffSession,
+    internalStaff,
+    staffRoles,
+    staffDesks
   } = useLifecycle();
 
   const location = useLocation();
@@ -1147,8 +1160,64 @@ function RequireAuthLayout() {
     return vendors[0]?.id || 'V-451';
   }, [vendors]);
 
+  const activeWorkspaceId = useMemo<SCIWorkspaceCode>(() => {
+    const path = location.pathname.substring(1);
+    if (path === 'dashboard' || path === '' || path.startsWith('lifecycle')) return 'home';
+    if (path === 'vendors' || path === 'activations') return 'vendor_operations';
+    if (path === 'plans' || path === 'pos' || path === 'apps') return 'licensing_centre';
+    if (path === 'capacity') return 'commercial';
+    if (path === 'staff' || path === 'roles' || path === 'desks' || path === 'menu-features') return 'internal_administration';
+    if (path === 'rpn') return 'rpn_operations';
+    if (path === 'finance') return 'finance';
+    if (path === 'diagnostics' || path === 'integrations' || path === 'settings' || path === 'audit' || path === 'notifications') return 'platform';
+    return 'home';
+  }, [location.pathname]);
+
+  const activeWorkspace = useMemo(() => {
+    return SCI_WORKSPACES.find(w => w.workspaceId === activeWorkspaceId);
+  }, [activeWorkspaceId]);
+
+  const currentWorkspaceAccess = useMemo(() => {
+    if (!activeWorkspace) return { allowed: false, message: "No active workspace.", reasonCode: "NO_WORKSPACE" };
+    return resolveWorkspaceAccess({
+      workspace: activeWorkspace,
+      session: activeStaffSession
+    });
+  }, [activeWorkspace, activeStaffSession]);
+
+  const accessRestrictedVM = useMemo(() => {
+    if (currentWorkspaceAccess.allowed) return null;
+    return buildAccessRestrictedViewModel({
+      reasonCode: currentWorkspaceAccess.reasonCode,
+      activeDesk: activeStaffSession?.activeDeskId,
+      requiredFeatureIds: activeWorkspace?.featureIds,
+      grantedFeatureIds: activeStaffSession?.grantedMenuFeatureIds
+    });
+  }, [currentWorkspaceAccess, activeWorkspace, activeStaffSession]);
+
+  const handleDeskSwitch = (deskId: string) => {
+    if (!activeStaffSession) return;
+    const staff = internalStaff.find(s => s.staffId === activeStaffSession.staffId);
+    const role = staffRoles.find(r => r.roleId === activeStaffSession.roleId);
+    const desk = staffDesks.find(d => d.deskId === deskId);
+
+    if (!staff || !role || !desk) {
+      alert("Error: Missing internal profile or desk configuration.");
+      return;
+    }
+
+    const decision = switchStaffDesk({ staff, role, desk });
+
+    if (decision.allowed && decision.session) {
+      setActiveStaffSession(decision.session);
+      alert(`Success: Switched active desk console to "${desk.deskName}".`);
+    } else {
+      alert(`Access Blocked: ${decision.message}`);
+    }
+  };
+
   return (
-    <div id="itred_control_console" className="flex h-screen bg-[#F4F4F1] text-[#1A1A1A] font-sans overflow-hidden select-none relative">
+    <div id="itred_control_console" className="flex flex-col h-screen bg-[#F4F4F1] text-[#1A1A1A] font-sans overflow-hidden select-none relative">
       
       {/* DEMO MODE Watermark Overlay */}
       {isDemoActive && (
@@ -1161,70 +1230,267 @@ function RequireAuthLayout() {
         </div>
       )}
 
-      {/* 1. LEFT SIDEBAR NAVIGATION */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          if (tab === 'staff_management') {
-            navigate('/staff');
-          } else if (tab === 'role_creator') {
-            navigate('/roles');
-          } else if (tab === 'desk_creator') {
-            navigate('/desks');
-          } else if (tab === 'menu_features') {
-            navigate('/menu-features');
-          } else {
-            navigate(`/${tab}`);
-          }
-          setSearchQuery(''); // Reset search upon navigation
-        }}
-        unreadNotificationsCount={notifications.filter((n: any) => !n.read).length}
-        pendingActivationsCount={activationRequests.filter((r: any) => r.status === 'Pending').length}
+      {/* TOP COMMAND BAR */}
+      <Toolbar
         activeStaffSession={activeStaffSession}
+        onLogout={() => {
+          setActiveStaffSession(null);
+          setIsGoogleLoggedIn(false);
+          localStorage.removeItem('sci_staff_session');
+          localStorage.removeItem('sgn_is_logged_in');
+          navigate('/login');
+        }}
+        notifications={notifications}
+        onNavigateToNotifications={() => navigate('/notifications')}
+        onSearch={setSearchQuery}
+        searchQuery={searchQuery}
+        isDemoActive={isDemoActive}
+        activeWorkspaceLabel={activeWorkspace?.label || 'Home'}
+        internalStaff={internalStaff}
+        staffRoles={staffRoles}
+        staffDesks={staffDesks}
+        onDeskSwitch={handleDeskSwitch}
       />
 
-      {/* 2. DEXTER WINDOW COLUMN (Toolbar + Working Canvas Area) */}
-      <div id="dexter_working_column" className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+      {/* MAIN CONTAINER SHELL */}
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
         
-        {/* TOP TOOLBAR */}
-        <Toolbar
-          activeStaffSession={activeStaffSession}
-          onLogout={() => {
-            setActiveStaffSession(null);
-            setIsGoogleLoggedIn(false);
-            localStorage.removeItem('sci_staff_session');
-            localStorage.removeItem('sgn_is_logged_in');
-            navigate('/login');
+        {/* Workspace Rail (Far-Left) */}
+        <WorkspaceRail
+          activeWorkspaceId={activeWorkspaceId}
+          onWorkspaceSelect={(path) => {
+            navigate(path);
           }}
-          notifications={notifications}
-          onNavigateToNotifications={() => navigate('/notifications')}
-          onSearch={setSearchQuery}
-          searchQuery={searchQuery}
-          isDemoActive={isDemoActive}
+          activeStaffSession={activeStaffSession}
         />
 
-        {/* WORKING AREA WORKING CANVAS */}
-        <main id="working_canvas_area" className="flex-1 overflow-y-auto p-8 relative">
-          {/* Main active subview container */}
+        {/* Secondary Navigation Panel */}
+        <Sidebar
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            if (tab === 'staff_management') {
+              navigate('/staff');
+            } else if (tab === 'role_creator') {
+              navigate('/roles');
+            } else if (tab === 'desk_creator') {
+              navigate('/desks');
+            } else if (tab === 'menu_features') {
+              navigate('/menu-features');
+            } else {
+              navigate(`/${tab}`);
+            }
+            setSearchQuery(''); // Reset search upon navigation
+          }}
+          unreadNotificationsCount={notifications.filter((n: any) => !n.read).length}
+          pendingActivationsCount={activationRequests.filter((r: any) => r.status === 'Pending').length}
+          activeStaffSession={activeStaffSession}
+          activeWorkspaceId={activeWorkspaceId}
+        />
+
+        {/* Main Content Area */}
+        <main id="working_canvas_area" className="flex-1 overflow-y-auto p-6 relative">
           <div className="max-w-7xl mx-auto space-y-6 pb-20">
-            <POSLicenseGuard>
-              <Outlet />
-            </POSLicenseGuard>
+            {currentWorkspaceAccess.allowed ? (
+              <POSLicenseGuard>
+                <Outlet />
+              </POSLicenseGuard>
+            ) : (
+              <div id="access_restricted_panel" className="bg-white border-4 border-[#1A1A1A] p-10 max-w-2xl mx-auto text-left space-y-6 shadow-2xl relative mt-12 font-mono text-[#1A1A1A]">
+                <div className="absolute top-0 left-0 right-0 h-2 bg-[#FF5A00]" />
+                
+                {/* Title and Badge */}
+                <div className="flex items-center space-x-3 text-[#FF5A00] border-b border-gray-200 pb-3">
+                  <ShieldAlert className="w-8 h-8 shrink-0" />
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-widest font-sans text-[#1A1A1A]">
+                      {accessRestrictedVM?.title || 'Access Restricted'}
+                    </h2>
+                    <span className="text-[8px] bg-red-150 text-red-750 px-1.5 uppercase font-bold">
+                      Clearance Blocked
+                    </span>
+                  </div>
+                </div>
+
+                {/* Denial Explanation */}
+                <div className="space-y-1">
+                  <div className="text-[9px] text-gray-400 uppercase font-black">REASON FOR DENIAL</div>
+                  <p className="text-xs text-red-650 font-bold leading-relaxed font-sans">
+                    {currentWorkspaceAccess.message || accessRestrictedVM?.message}
+                  </p>
+                </div>
+
+                {/* Profiles & Terminal status */}
+                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-3 border border-gray-150 text-[9px] uppercase font-bold text-gray-600">
+                  <div>
+                    <span>Active Operator Profile:</span>
+                    <div className="text-gray-800 font-black">{activeStaffSession?.fullName}</div>
+                  </div>
+                  <div>
+                    <span>Active Terminal Desk:</span>
+                    <div className="text-gray-800 font-black">{accessRestrictedVM?.activeDesk}</div>
+                  </div>
+                </div>
+
+                {/* Clearance Specifications Compare */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <div className="text-[9px] text-gray-400 uppercase font-bold border-b border-gray-150 pb-0.5">Required Clearances</div>
+                    <div className="flex flex-wrap gap-1">
+                      {accessRestrictedVM?.requiredFeatureIds?.map(f => (
+                        <span key={f} className="bg-stone-200 text-stone-850 px-1.5 py-0.5 text-[8px] font-mono select-all">
+                          {f}
+                        </span>
+                      )) || <span className="text-gray-400 italic">None</span>}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[9px] text-gray-400 uppercase font-bold border-b border-gray-150 pb-0.5">Granted Clearances</div>
+                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                      {accessRestrictedVM?.grantedFeatureIds?.map(f => (
+                        <span key={f} className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[8px] font-mono select-all border border-emerald-150">
+                          {f}
+                        </span>
+                      )) || <span className="text-gray-400 italic">None</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Desk Switcher Actions footer */}
+                <div className="pt-4 border-t border-[#D1D1CF] flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <button
+                    onClick={() => navigate('/dashboard')}
+                    className="px-4 py-2 border-2 border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white transition-all text-[10px] font-black uppercase tracking-wider rounded-none cursor-pointer font-sans"
+                  >
+                    Return to Dashboard
+                  </button>
+
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[9px] text-gray-400 font-bold uppercase font-sans">Quick Switch Desk:</span>
+                    <select
+                      value={activeStaffSession?.activeDeskId}
+                      onChange={(e) => handleDeskSwitch(e.target.value)}
+                      className="bg-white border-2 border-[#1A1A1A] text-xs font-bold focus:outline-none uppercase px-3 py-1 font-sans cursor-pointer"
+                    >
+                      {staffDesks
+                        .filter(d => {
+                          const activeStaff = internalStaff.find(s => s.staffId === activeStaffSession?.staffId);
+                          return activeStaff?.assignedDeskIds.includes(d.deskId);
+                        })
+                        .map(d => (
+                          <option key={d.deskId} value={d.deskId}>
+                            {d.deskName} ({d.deskCode})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+
+              </div>
+            )}
           </div>
         </main>
 
-        {/* FOOTER STATUS */}
-        <footer className="h-8 bg-[#1A1A1A] text-[#8E9299] text-[9px] px-8 flex items-center justify-between shrink-0 font-mono tracking-widest relative z-10">
-          <div className="flex space-x-6">
-            <span>LATENCY: 12ms</span>
-            <span>SECURITY: Level 4 SSL Active</span>
+        {/* Right Utility Panel */}
+        <div id="right_utility_panel" className="w-64 border-l border-[#D1D1CF] bg-white overflow-y-auto p-4 space-y-6 hidden xl:block shrink-0 font-mono text-[10px] text-[#1A1A1A]">
+          
+          {/* Recent Activity Card */}
+          <div className="space-y-2">
+            <div className="font-black text-[#FF5A00] uppercase tracking-wider border-b border-[#D1D1CF] pb-1.5 flex items-center justify-between">
+              <span>Recent Activity</span>
+              <span className="w-1.5 h-1.5 bg-[#FF5A00] rounded-none animate-pulse" />
+            </div>
+            <div className="space-y-1.5 leading-relaxed text-gray-500 font-sans">
+              <div className="bg-gray-50 p-2 border border-gray-150 rounded-none font-mono text-[9px]">
+                <span className="text-gray-400">14:02:11</span> Console resolved access for <strong className="text-gray-800 font-bold">{activeStaffSession?.fullName}</strong>.
+              </div>
+              <div className="bg-gray-50 p-2 border border-gray-150 rounded-none font-mono text-[9px]">
+                <span className="text-gray-400">13:44:02</span> Telemetry check for cluster <strong className="text-gray-800 font-bold">seiGEN_PROD_04</strong> completed.
+              </div>
+              <div className="bg-gray-50 p-2 border border-gray-150 rounded-none font-mono text-[9px]">
+                <span className="text-gray-400">11:15:30</span> POS licensing collection logs loaded.
+              </div>
+            </div>
           </div>
-          <div className="flex items-center">
-            <span className="w-1.5 h-1.5 bg-green-500 mr-2 rounded-full animate-pulse"></span>
-            SYSTEMS NOMINAL — BUILD 4.8.2-RELEASE
+
+          {/* Pending Approvals Card */}
+          <div className="space-y-2 font-mono">
+            <div className="font-black text-gray-850 uppercase tracking-wider border-b border-[#D1D1CF] pb-1.5">
+              Pending Approvals
+            </div>
+            <div className="space-y-1.5">
+              <div className="bg-orange-50/50 p-2.5 border border-orange-205 text-orange-900 rounded-none">
+                <div className="font-bold text-[9px]">VENDOR: SPARKCORP</div>
+                <div className="text-[8px] text-gray-500 mt-0.5 font-sans normal-case">Awaiting compliance verification checks.</div>
+              </div>
+              <div className="bg-gray-50 p-2.5 border border-gray-150 rounded-none">
+                <div className="font-bold text-[9px]">LICENSE: L-801-RENEW</div>
+                <div className="text-[8px] text-gray-500 mt-0.5 font-sans normal-case">POS activation request keys waiting.</div>
+              </div>
+            </div>
           </div>
-        </footer>
+
+          {/* System Health Card */}
+          <div className="space-y-2 font-mono">
+            <div className="font-black text-gray-850 uppercase tracking-wider border-b border-[#D1D1CF] pb-1.5">
+              System Health
+            </div>
+            <div className="bg-gray-50 p-3 border border-gray-150 rounded-none space-y-2 uppercase font-bold text-gray-650 text-[9px]">
+              <div className="flex justify-between">
+                <span>Cluster Ingress:</span>
+                <span className="text-green-600">Stable</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Diagnostic Tunnels:</span>
+                <span className="text-green-600">99.9% Online</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Sync Node Cluster:</span>
+                <span className="text-green-600">Active</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Actions Card */}
+          <div className="space-y-2 font-mono">
+            <div className="font-black text-gray-850 uppercase tracking-wider border-b border-[#D1D1CF] pb-1.5">
+              Quick Actions
+            </div>
+            <div className="space-y-1">
+              <button
+                onClick={() => {
+                  alert("Telemetry logs flushed. Broadcast channel refreshed.");
+                }}
+                className="w-full text-left p-2 border border-gray-200 hover:border-[#1A1A1A] bg-gray-50 hover:bg-[#1A1A1A] hover:text-white uppercase font-bold transition-all rounded-none cursor-pointer"
+              >
+                Flush Telemetry Tunnels
+              </button>
+              <button
+                onClick={() => {
+                  alert("Diagnostics ping dispatched across 3 data center regions.");
+                }}
+                className="w-full text-left p-2 border border-gray-200 hover:border-[#1A1A1A] bg-gray-50 hover:bg-[#1A1A1A] hover:text-white uppercase font-bold transition-all rounded-none cursor-pointer"
+              >
+                Trigger Diagnostic Ping
+              </button>
+            </div>
+          </div>
+
+        </div>
+
       </div>
+
+      {/* FOOTER STATUS */}
+      <footer className="h-8 bg-[#1A1A1A] text-[#8E9299] text-[9px] px-8 flex items-center justify-between shrink-0 font-mono tracking-widest relative z-10">
+        <div className="flex space-x-6">
+          <span>LATENCY: 12ms</span>
+          <span>SECURITY: Level 4 SSL Active</span>
+        </div>
+        <div className="flex items-center">
+          <span className="w-1.5 h-1.5 bg-green-500 mr-2 rounded-full animate-pulse"></span>
+          SYSTEMS NOMINAL — BUILD 4.8.2-RELEASE
+        </div>
+      </footer>
 
       {/* Floating Simulator Controls Fast Travel Widget */}
       <SimulatorControls 
