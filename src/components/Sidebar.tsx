@@ -15,6 +15,7 @@ import {
   Boxes,
   Sparkles
 } from 'lucide-react';
+import { SCIStaffSession } from '../internal/staffTypes';
 
 export type SidebarTab =
   | 'dashboard'
@@ -43,68 +44,79 @@ interface SidebarProps {
   onTabChange: (tab: SidebarTab) => void;
   unreadNotificationsCount: number;
   pendingActivationsCount: number;
+  activeStaffSession: SCIStaffSession | null;
 }
 
 export default function Sidebar({
   activeTab,
   onTabChange,
   unreadNotificationsCount,
-  pendingActivationsCount
+  pendingActivationsCount,
+  activeStaffSession
 }: SidebarProps) {
   
   const sections: {
     title: string;
-    items: { id: SidebarTab; label: string; icon: React.ComponentType<any>; badge?: number }[];
+    items: { id: SidebarTab; label: string; icon: React.ComponentType<any>; featureId: string; badge?: number }[];
   }[] = [
     {
       title: 'HOME',
       items: [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, featureId: 'dashboard' }
       ]
     },
     {
       title: 'BUSINESS',
       items: [
-        { id: 'vendors', label: 'Vendor Management', icon: Users },
-        { id: 'activations', label: 'Activation Requests', icon: Key, badge: pendingActivationsCount },
-        { id: 'rpn', label: 'RPN Management', icon: Activity }
+        { id: 'vendors', label: 'Vendor Management', icon: Users, featureId: 'vendors' },
+        { id: 'activations', label: 'Activation Requests', icon: Key, featureId: 'activation_requests', badge: pendingActivationsCount },
+        { id: 'rpn', label: 'RPN Management', icon: Activity, featureId: 'rpn_management' }
       ]
     },
     {
       title: 'COMMERCIAL',
       items: [
-        { id: 'plans', label: 'Plans & Pricing', icon: Layers },
-        { id: 'capacity', label: 'Capacity', icon: Cpu },
-        { id: 'pos', label: 'POS Licensing', icon: Terminal },
-        { id: 'apps', label: 'App Licensing', icon: Cpu }
+        { id: 'plans', label: 'Plans & Pricing', icon: Layers, featureId: 'plans_pricing' },
+        { id: 'capacity', label: 'Capacity', icon: Cpu, featureId: 'capacity' },
+        { id: 'pos', label: 'POS Licensing', icon: Terminal, featureId: 'pos_licensing' },
+        { id: 'apps', label: 'App Licensing', icon: Cpu, featureId: 'app_licensing' }
       ]
     },
     {
       title: 'INTERNAL ADMINISTRATION',
       items: [
-        { id: 'staff_management', label: 'Staff Management', icon: Users },
-        { id: 'role_creator', label: 'Staff Roles', icon: Sparkles },
-        { id: 'desk_creator', label: 'Staff Desks', icon: Terminal },
-        { id: 'menu_features', label: 'Menu Features', icon: Layers }
+        { id: 'staff_management', label: 'Staff Management', icon: Users, featureId: 'staff_management' },
+        { id: 'role_creator', label: 'Staff Roles', icon: Sparkles, featureId: 'role_creator' },
+        { id: 'desk_creator', label: 'Staff Desks', icon: Terminal, featureId: 'desk_creator' },
+        { id: 'menu_features', label: 'Menu Features', icon: Layers, featureId: 'menu_features' }
       ]
     },
     {
       title: 'OPERATIONS',
       items: [
-        { id: 'audit', label: 'Audit Logs', icon: FileText },
-        { id: 'notifications', label: 'Notifications', icon: Bell, badge: unreadNotificationsCount },
-        { id: 'finance', label: 'Finance', icon: Coins }
+        { id: 'audit', label: 'Audit Logs', icon: FileText, featureId: 'audit_logs' },
+        { id: 'notifications', label: 'Notifications', icon: Bell, featureId: 'notifications', badge: unreadNotificationsCount },
+        { id: 'finance', label: 'Finance', icon: Coins, featureId: 'finance' }
       ]
     },
     {
       title: 'PLATFORM',
       items: [
-        { id: 'diagnostics', label: 'Diagnostics', icon: Activity },
-        { id: 'integrations', label: 'Integrations', icon: Database },
-        { id: 'settings', label: 'Settings', icon: Settings }
+        { id: 'diagnostics', label: 'Diagnostics', icon: Activity, featureId: 'diagnostics' },
+        { id: 'integrations', label: 'Integrations', icon: Database, featureId: 'integrations' },
+        { id: 'settings', label: 'Settings', icon: Settings, featureId: 'settings' }
       ]
     }
   ];
+
+  // Dynamic filtering based on session menu feature clearance rules
+  const filteredSections = sections.map((section) => {
+    const allowedItems = section.items.filter((item) => {
+      if (!activeStaffSession) return true; // Show all during initial auth routing setup
+      return activeStaffSession.grantedMenuFeatureIds.includes(item.featureId);
+    });
+    return { ...section, items: allowedItems };
+  }).filter((section) => section.items.length > 0);
 
   return (
     <aside id="sidebar_container" className="w-64 bg-[#1A1A1A] border-r border-[#2A2A2A] flex flex-col h-full text-white shrink-0 font-sans select-none">
@@ -121,7 +133,7 @@ export default function Sidebar({
 
       {/* Nav Menu */}
       <nav id="sidebar_nav" className="flex-1 overflow-y-auto py-4 space-y-4">
-        {sections.map((section) => (
+        {filteredSections.map((section) => (
           <div key={section.title} className="space-y-1">
             <div className="px-6 text-[9px] uppercase tracking-widest text-[#FF5A00] font-black font-mono opacity-80">
               {section.title}

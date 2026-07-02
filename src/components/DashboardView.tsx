@@ -26,9 +26,10 @@ interface DashboardViewProps {
   stats: DashboardStats;
   recentLogs: AuditLog[];
   onQuickAction: (actionId: 'create_vendor' | 'approve_vendor' | 'create_plan' | 'issue_pos' | 'activate_app') => void;
+  dashboardType?: string;
 }
 
-export default function DashboardView({ stats, recentLogs, onQuickAction }: DashboardViewProps) {
+export default function DashboardView({ stats, recentLogs, onQuickAction, dashboardType = 'executive' }: DashboardViewProps) {
   
   const cards = [
     {
@@ -81,12 +82,28 @@ export default function DashboardView({ stats, recentLogs, onQuickAction }: Dash
     }
   ];
 
+  // Dynamically filter cards based on active desk console dashboardType
+  const filteredCards = React.useMemo(() => {
+    if (dashboardType === 'sales') {
+      return cards.filter(c => c.id === 'stat_revenue' || c.id === 'stat_total_vendors' || c.id === 'stat_active_pos');
+    }
+    if (dashboardType === 'support') {
+      return cards.filter(c => c.id === 'stat_pending_activations' || c.id === 'stat_pending_verifications' || c.id === 'stat_rpn_agents');
+    }
+    if (dashboardType === 'operations') {
+      return cards.filter(c => c.id === 'stat_pending_activations' || c.id === 'stat_rpn_agents' || c.id === 'stat_pending_verifications');
+    }
+    return cards;
+  }, [dashboardType, stats]);
+
   return (
     <div id="dashboard_view" className="space-y-8">
       {/* View Header */}
       <div id="dashboard_header" className="flex justify-between items-center border-b border-[#D1D1CF] pb-4">
         <div>
-          <h1 className="text-xl font-bold font-sans text-[#1A1A1A] uppercase tracking-wider">iTred Control Dashboard</h1>
+          <h1 className="text-xl font-bold font-sans text-[#1A1A1A] uppercase tracking-wider">
+            iTred Control Dashboard — {dashboardType} console
+          </h1>
           <p className="text-xs text-gray-400 font-mono mt-0.5">ECOSYSTEM OPERATIONS METRICS PORTAL — COMPRESSED SCHEMA</p>
         </div>
         <div className="flex items-center space-x-2 text-xs font-mono bg-[#F4F4F1] border border-[#D1D1CF] px-3 py-1.5 text-[#1A1A1A]">
@@ -97,7 +114,7 @@ export default function DashboardView({ stats, recentLogs, onQuickAction }: Dash
 
       {/* Stats Cards Grid */}
       <div id="dashboard_stats_grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {cards.map((card) => {
+        {filteredCards.map((card) => {
           const Icon = card.icon;
           return (
             <div

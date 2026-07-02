@@ -1056,7 +1056,7 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
 
 function LoginRoute() {
   const { isGoogleLoggedIn, setIsGoogleLoggedIn, setGoogleEmail } = useLifecycle();
-  if (isGoogleLoggedIn) return <Navigate to="/company-selector" replace />;
+  if (isGoogleLoggedIn) return <Navigate to="/staff-access" replace />;
   return (
     <GoogleLoginView 
       onLogin={(email) => {
@@ -1068,27 +1068,38 @@ function LoginRoute() {
 }
 
 function CompanyRoute() {
-  const { isGoogleLoggedIn, currentCompany, setCurrentCompany } = useLifecycle();
-  if (!isGoogleLoggedIn) return <Navigate to="/login" replace />;
-  return (
-    <CompanySelectorView 
-      onSelectCompany={setCurrentCompany} 
-      selectedCompany={currentCompany} 
-    />
-  );
+  return <Navigate to="/staff-access" replace />;
 }
 
 function StaffRoute() {
-  const { isGoogleLoggedIn, currentCompany, currentAdmin, setCurrentAdmin } = useLifecycle();
+  const { 
+    isGoogleLoggedIn, 
+    googleEmail,
+    internalStaff, 
+    staffRoles, 
+    staffDesks, 
+    internalMenuFeatures,
+    activeStaffSession, 
+    setActiveStaffSession 
+  } = useLifecycle();
+
   if (!isGoogleLoggedIn) return <Navigate to="/login" replace />;
-  if (!currentCompany) return <Navigate to="/company-selector" replace />;
+
+  const handleLoginSuccess = (session: SCIStaffSession) => {
+    setActiveStaffSession(session);
+    localStorage.setItem('sci_staff_session', JSON.stringify(session));
+  };
+
   return (
-    <POSLicenseGuard>
-      <StaffAccessView 
-        onSelectAdmin={setCurrentAdmin} 
-        selectedAdmin={currentAdmin} 
-      />
-    </POSLicenseGuard>
+    <StaffAccessView 
+      internalStaff={internalStaff}
+      staffRoles={staffRoles}
+      staffDesks={staffDesks}
+      menuFeatures={internalMenuFeatures}
+      activeStaffSession={activeStaffSession}
+      onLoginSuccess={handleLoginSuccess}
+      googleEmail={googleEmail}
+    />
   );
 }
 
@@ -1097,31 +1108,25 @@ function RequireAuthLayout() {
   const { 
     isGoogleLoggedIn, 
     googleEmail,
-    currentCompany, 
-    currentAdmin, 
-    setCurrentAdmin, 
-    setCurrentCompany,
     notifications,
     handleMarkAllRead,
     activationRequests,
     searchQuery,
     setSearchQuery,
-    handleResetState,
     vendors,
-    isDemoActive
+    isDemoActive,
+    activeStaffSession,
+    setActiveStaffSession
   } = useLifecycle();
 
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Redirect to Google Login or company/staff if missing session keys
+  // Redirect to Google Login or staff access portal if missing session keys
   if (!isGoogleLoggedIn) {
     return <Navigate to="/login" replace />;
   }
-  if (!currentCompany) {
-    return <Navigate to="/company-selector" replace />;
-  }
-  if (!currentAdmin) {
+  if (!activeStaffSession) {
     return <Navigate to="/staff-access" replace />;
   }
 
@@ -1175,6 +1180,7 @@ function RequireAuthLayout() {
         }}
         unreadNotificationsCount={notifications.filter((n: any) => !n.read).length}
         pendingActivationsCount={activationRequests.filter((r: any) => r.status === 'Pending').length}
+        activeStaffSession={activeStaffSession}
       />
 
       {/* 2. DEXTER WINDOW COLUMN (Toolbar + Working Canvas Area) */}
@@ -1182,16 +1188,18 @@ function RequireAuthLayout() {
         
         {/* TOP TOOLBAR */}
         <Toolbar
-          currentCompany={currentCompany}
-          onCompanyChange={setCurrentCompany}
-          currentAdmin={currentAdmin}
-          onAdminChange={setCurrentAdmin}
+          activeStaffSession={activeStaffSession}
+          onLogout={() => {
+            setActiveStaffSession(null);
+            setIsGoogleLoggedIn(false);
+            localStorage.removeItem('sci_staff_session');
+            localStorage.removeItem('sgn_is_logged_in');
+            navigate('/login');
+          }}
           notifications={notifications}
           onNavigateToNotifications={() => navigate('/notifications')}
           onSearch={setSearchQuery}
           searchQuery={searchQuery}
-          googleEmail={googleEmail}
-          vendors={vendors}
           isDemoActive={isDemoActive}
         />
 
@@ -1267,6 +1275,7 @@ function DashboardRoute() {
       <DashboardView
         stats={computedStats}
         recentLogs={auditLogs}
+        dashboardType={activeStaffSession?.dashboardType}
         onQuickAction={(actionId) => {
           if (actionId === 'create_vendor') {
             navigate('/lifecycle/create-vendor');
