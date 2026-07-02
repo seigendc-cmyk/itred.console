@@ -14,20 +14,71 @@ import {
   Layers, 
   MapPin, 
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Plus,
+  Briefcase
 } from 'lucide-react';
 
 interface RPNManagementViewProps {
   rpnAgents: RPNAgent[];
   onPingNode: (nodeId: string) => void;
   vendors?: Vendor[];
+  onAddRPNAgent?: (agent: RPNAgent) => void;
+  currentAdmin?: any;
 }
 
-export default function RPNManagementView({ rpnAgents, onPingNode, vendors = [] }: RPNManagementViewProps) {
+export default function RPNManagementView({ 
+  rpnAgents, 
+  onPingNode, 
+  vendors = [],
+  onAddRPNAgent,
+  currentAdmin
+}: RPNManagementViewProps) {
   const [activeTab, setActiveTab] = useState<'nodes' | 'attachments'>('nodes');
   const [selectedRpnId, setSelectedRpnId] = useState<string>(rpnAgents[0]?.id || '');
   const [showPrintPreview, setShowPrintPreview] = useState<string | null>(null);
 
+  // Add RPN Agent Form States
+  const [isAddDrawerOpen, setIsAddDrawerOpen] = useState(false);
+  const [formName, setFormName] = useState('');
+  const [formRegion, setFormRegion] = useState('US-East');
+  const [formStatus, setFormStatus] = useState<'Connected' | 'Standby' | 'Offline'>('Connected');
+  const [formAgentType, setFormAgentType] = useState<'relay' | 'acquisition_agent'>('relay');
+  const [formCommission, setFormCommission] = useState(10);
+  const [formNotes, setFormNotes] = useState('');
+
+  const handleAddSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName.trim()) return;
+
+    const newId = formAgentType === 'acquisition_agent' 
+      ? `AGN-${Math.floor(100 + Math.random() * 900)}`
+      : `RPN-${Math.floor(100 + Math.random() * 900)}`;
+
+    const newAgent: RPNAgent = {
+      id: newId,
+      name: formName,
+      region: formRegion,
+      connectionStatus: formStatus,
+      activeSessions: formAgentType === 'acquisition_agent' ? 0 : Math.floor(Math.random() * 150),
+      throughput: formAgentType === 'acquisition_agent' ? 'N/A' : `${(Math.random() * 80).toFixed(1)} Tx/s`,
+      agentType: formAgentType,
+      commissionRate: formAgentType === 'acquisition_agent' ? formCommission : undefined,
+      acquisitionCount: formAgentType === 'acquisition_agent' ? 0 : undefined,
+      notes: formAgentType === 'acquisition_agent' ? formNotes : undefined,
+      linkedVendorIds: []
+    };
+
+    if (onAddRPNAgent) {
+      onAddRPNAgent(newAgent);
+    }
+    
+    // Reset Form
+    setFormName('');
+    setFormNotes('');
+    setIsAddDrawerOpen(false);
+  };
+  
   const selectedAgent = rpnAgents.find(agent => agent.id === selectedRpnId);
   
   // Dynamic calculation of attached vendors
@@ -84,9 +135,18 @@ export default function RPNManagementView({ rpnAgents, onPingNode, vendors = [] 
           <h1 className="text-xl font-bold font-sans text-[#1A1A1A] uppercase tracking-wider">RPN Management</h1>
           <p className="text-xs text-gray-500 mt-0.5">RELAY PROCESSING NODE ROUTING SYSTEM & ENCRYPTED TRANSITS</p>
         </div>
-        <div className="flex items-center space-x-2 text-xs bg-[#EAEAE8] border border-[#D1D1CF] px-3 py-1.5 text-[#1A1A1A]">
-          <Radio className="w-4 h-4 text-[#FF5A00] animate-pulse" />
-          <span>GLOBAL BROADCAST: STABLE UPLINKS</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsAddDrawerOpen(true)}
+            className="flex items-center space-x-1.5 bg-[#1A1A1A] hover:bg-[#FF5A00] text-white text-xs font-bold py-2.5 px-4 uppercase tracking-wider transition-colors rounded-none cursor-pointer border border-transparent shadow-sm"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>Register Node / Agent</span>
+          </button>
+          <div className="flex items-center space-x-2 text-xs bg-[#EAEAE8] border border-[#D1D1CF] px-3 py-1.5 text-[#1A1A1A]">
+            <Radio className="w-4 h-4 text-[#FF5A00] animate-pulse" />
+            <span>GLOBAL BROADCAST: STABLE UPLINKS</span>
+          </div>
         </div>
       </div>
 
@@ -157,20 +217,38 @@ export default function RPNManagementView({ rpnAgents, onPingNode, vendors = [] 
                       agent.connectionStatus === 'Standby' ? 'bg-amber-50 border-amber-200 text-amber-700' :
                       'bg-red-50 border-red-200 text-red-700'
                     }`}>
-                      <Database className="w-5 h-5" />
+                      {agent.agentType === 'acquisition_agent' ? (
+                        <Briefcase className="w-5 h-5" />
+                      ) : (
+                        <Database className="w-5 h-5" />
+                      )}
                     </div>
                     <div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-[#1A1A1A] text-sm font-sans uppercase">
                           {agent.name}
                         </span>
                         <span className="text-[10px] bg-gray-200 text-gray-700 px-1 text-xs font-semibold uppercase">
                           {agent.id}
                         </span>
+                        {agent.agentType === 'acquisition_agent' ? (
+                          <span className="bg-orange-100 text-[#FF5A00] border border-orange-200 text-[9px] px-1.5 py-0.2 font-black uppercase tracking-wider font-mono">
+                            Acquisition Agent
+                          </span>
+                        ) : (
+                          <span className="bg-stone-100 text-stone-700 border border-stone-200 text-[9px] px-1.5 py-0.2 font-semibold uppercase tracking-wider font-mono">
+                            Relay Node
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-gray-500 uppercase tracking-wider mt-0.5">
                         {agent.region} • CURRENT ACTIVE THROUGHPUT: <strong className="text-gray-700 font-bold">{agent.throughput}</strong>
                       </div>
+                      {agent.agentType === 'acquisition_agent' && (
+                        <div className="text-[10px] text-[#FF5A00] font-sans font-bold mt-1 uppercase">
+                          Commission Rate: {agent.commissionRate || 10}% • Hired Handoffs: {agent.acquisitionCount || 0} Vendors Acquired
+                        </div>
+                      )}
                       <div className="mt-1.5">
                         <button
                           onClick={() => {
@@ -258,6 +336,37 @@ export default function RPNManagementView({ rpnAgents, onPingNode, vendors = [] 
               </div>
             )}
           </div>
+
+          {selectedAgent && selectedAgent.agentType === 'acquisition_agent' && (
+            <div className="bg-orange-50/15 border-2 border-[#FF5A00]/20 p-5 font-mono text-xs space-y-3">
+              <div className="text-[10px] font-bold text-[#FF5A00] uppercase border-b border-[#FF5A00]/25 pb-1 flex justify-between">
+                <span>INDEPENDENT ACQUISITION AGENT CONTRACT PORTFOLIO</span>
+                <span>Active Status</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-sans">
+                <div className="space-y-0.5">
+                  <span className="text-gray-400 uppercase text-[9px] font-mono">Commission Bracket Rate</span>
+                  <div className="text-base font-bold text-[#1A1A1A]">{selectedAgent.commissionRate || 10}% Commission</div>
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-gray-400 uppercase text-[9px] font-mono">Affiliate Acquisitions</span>
+                  <div className="text-base font-bold text-gray-800">{selectedAgent.acquisitionCount || 0} Enterprise Vendors</div>
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-gray-400 uppercase text-[9px] font-mono">Agent Node Bind ID</span>
+                  <div className="text-base font-bold text-[#FF5A00] font-mono">{selectedAgent.id}</div>
+                </div>
+                {selectedAgent.notes && (
+                  <div className="col-span-1 md:col-span-3 pt-2 border-t border-dashed border-gray-250">
+                    <span className="text-gray-400 uppercase text-[9px] font-mono">Affiliation Territory Notes</span>
+                    <p className="text-gray-700 text-xs mt-1 leading-relaxed bg-white p-3 border border-[#D1D1CF]">
+                      {selectedAgent.notes}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="bg-white border border-[#D1D1CF]">
             {/* Table Header and Print Button */}
@@ -479,6 +588,122 @@ export default function RPNManagementView({ rpnAgents, onPingNode, vendors = [] 
             <span className="font-bold text-[#FF5A00]">PRO-TIP:</span> The print preview uses dedicated print CSS media targets. Only the clean document page in white background will print on paper.
           </div>
 
+        </div>
+      )}
+
+      {/* ==========================================================================
+         REGISTER NODE/AGENT DRAWER
+         ========================================================================== */}
+      {isAddDrawerOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex justify-end z-50 font-mono text-xs text-[#1A1A1A]">
+          <div className="absolute inset-0" onClick={() => setIsAddDrawerOpen(false)} />
+          <div className="bg-white border-l-4 border-[#1A1A1A] w-full max-w-md h-full relative z-10 flex flex-col justify-between shadow-2xl p-6 animate-slide-in overflow-y-auto">
+            <div>
+              <div className="flex justify-between items-center border-b border-[#D1D1CF] pb-4">
+                <div className="flex items-center space-x-2">
+                  <Plus className="w-5 h-5 text-[#FF5A00]" />
+                  <h2 className="text-sm font-bold uppercase text-[#1A1A1A]">REGISTER NODE / AGENT</h2>
+                </div>
+                <button onClick={() => setIsAddDrawerOpen(false)} className="text-gray-400 hover:text-black">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddSubmit} className="space-y-4 mt-6">
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Node/Agent Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. CapeTown-Edge-RPN or Agent Smith"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Region Jurisdiction</label>
+                  <select
+                    value={formRegion}
+                    onChange={(e) => setFormRegion(e.target.value)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none rounded-none"
+                  >
+                    <option value="US-East">US-East (Virginia)</option>
+                    <option value="EU-West">EU-West (Frankfurt)</option>
+                    <option value="AF-South">AF-South (Cape Town)</option>
+                    <option value="AP-South">AP-South (Mumbai)</option>
+                    <option value="SA-East">SA-East (São Paulo)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Agent Role Type</label>
+                  <select
+                    value={formAgentType}
+                    onChange={(e) => setFormAgentType(e.target.value as any)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none font-bold rounded-none"
+                  >
+                    <option value="relay">Core Relay Node (Data Telemetry)</option>
+                    <option value="acquisition_agent">Independent Acquisition Agent (Hired Handoffs)</option>
+                  </select>
+                </div>
+
+                {formAgentType === 'acquisition_agent' && (
+                  <div className="space-y-4 bg-orange-50/15 border border-[#FF5A00]/20 p-4">
+                    <div className="space-y-1">
+                      <label className="text-gray-500 uppercase text-[9px] block font-bold">Commission Rate (%)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        required
+                        value={formCommission}
+                        onChange={(e) => setFormCommission(parseInt(e.target.value) || 10)}
+                        className="w-full bg-white border border-[#D1D1CF] p-2 text-xs focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-gray-500 uppercase text-[9px] block font-bold">Hiring & Contract Notes</label>
+                      <textarea
+                        rows={2}
+                        placeholder="Detail vendor acquisition territory boundaries..."
+                        value={formNotes}
+                        onChange={(e) => setFormNotes(e.target.value)}
+                        className="w-full bg-white border border-[#D1D1CF] p-2 text-xs focus:outline-none font-sans"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Initial Telemetry Status</label>
+                  <select
+                    value={formStatus}
+                    onChange={(e) => setFormStatus(e.target.value as any)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none rounded-none"
+                  >
+                    <option value="Connected">Connected (Active Broadcast)</option>
+                    <option value="Standby">Standby (Cold Buffer)</option>
+                    <option value="Offline">Offline (Downlink Locked)</option>
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-[#FF5A00] hover:bg-[#1A1A1A] text-white py-3 uppercase font-bold text-center tracking-wider transition-colors rounded-none mt-4 cursor-pointer"
+                >
+                  Commit RPN Credentials
+                </button>
+              </form>
+            </div>
+            <button
+              onClick={() => setIsAddDrawerOpen(false)}
+              className="w-full bg-white border border-[#D1D1CF] text-gray-700 py-2.5 uppercase font-bold text-center hover:bg-gray-100 transition-colors rounded-none cursor-pointer mt-4"
+            >
+              Cancel Operation
+            </button>
+          </div>
         </div>
       )}
 

@@ -60,6 +60,8 @@ export default function Sidebar({
     { id: 'notifications', label: 'Notifications', icon: Bell, badge: unreadNotificationsCount },
     { id: 'audit', label: 'Audit Logs', icon: FileText },
     { id: 'ai_analyst', label: 'AI Analyst Dashboard', icon: Sparkles },
+    { id: 'staff_roles', label: 'Staff Desks & Roles', icon: Users },
+    { id: 'menu_features', label: 'Menu Features Registry', icon: Layers },
     { id: 'settings', label: 'System Settings', icon: Settings },
     { id: 'diagnostics', label: 'SCI Diagnostics', icon: Activity },
     { id: 'integrations', label: 'Integrations', icon: Database },

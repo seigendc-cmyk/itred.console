@@ -77,6 +77,10 @@ export interface RPNAgent {
   activeSessions: number;
   throughput: string;
   linkedVendorIds?: string[];
+  agentType?: 'relay' | 'acquisition_agent';
+  commissionRate?: number;
+  acquisitionCount?: number;
+  notes?: string;
 }
 
 export interface AuditLog {

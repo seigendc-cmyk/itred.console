@@ -22,6 +22,8 @@ import FinanceView from './components/FinanceView';
 import EcosystemDashboardView from './components/EcosystemDashboardView';
 import AIAnalystView from './components/AIAnalystView';
 import SCIDiagnosticsView from './components/SCIDiagnosticsView';
+import MenuFeaturesView from './components/MenuFeaturesView';
+import StaffManagementView from './components/StaffManagementView';
 import ErrorBoundary from './components/ErrorBoundary';
 import POSLicenseGuard from './guards/POSLicenseGuard';
 import {
@@ -44,7 +46,10 @@ import {
   INITIAL_FINANCE_RECORDS,
   INITIAL_NOTIFICATIONS,
   INITIAL_SYSTEM_CONFIG,
-  INITIAL_INTEGRATIONS
+  INITIAL_INTEGRATIONS,
+  INITIAL_MENU_FEATURES,
+  INITIAL_STAFF_DESKS,
+  INITIAL_STAFF_MEMBERS
 } from './data';
 
 import {
@@ -58,7 +63,10 @@ import {
   FinanceRecord,
   AppNotification,
   SystemConfig,
-  IntegrationService
+  IntegrationService,
+  StaffMember,
+  StaffDesk,
+  MenuFeature
 } from './types';
 
 import {
@@ -116,6 +124,8 @@ export default function App() {
               <Route path="/ecosystem" element={<EcosystemRoute />} />
               <Route path="/ai_analyst" element={<AIAnalystRoute />} />
               <Route path="/diagnostics" element={<DiagnosticsRoute />} />
+              <Route path="/staff_roles" element={<StaffRolesRoute />} />
+              <Route path="/menu_features" element={<MenuFeaturesRoute />} />
 
               {/* Special Guided Vendor Lifecycle Routes */}
               <Route path="/lifecycle/create-vendor" element={<CreateVendorRoute />} />
@@ -227,6 +237,31 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
   });
   const [systemConfig, setSystemConfig] = useState<SystemConfig>(INITIAL_SYSTEM_CONFIG);
   const [integrations, setIntegrations] = useState<IntegrationService[]>(INITIAL_INTEGRATIONS);
+
+  const [menuFeatures, setMenuFeatures] = useState<MenuFeature[]>(() => {
+    const saved = localStorage.getItem('sgn_menu_features');
+    return saved ? JSON.parse(saved) : INITIAL_MENU_FEATURES;
+  });
+  const [staffDesks, setStaffDesks] = useState<StaffDesk[]>(() => {
+    const saved = localStorage.getItem('sgn_staff_desks');
+    return saved ? JSON.parse(saved) : INITIAL_STAFF_DESKS;
+  });
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>(() => {
+    const saved = localStorage.getItem('sgn_staff_members');
+    return saved ? JSON.parse(saved) : INITIAL_STAFF_MEMBERS;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sgn_menu_features', JSON.stringify(menuFeatures));
+  }, [menuFeatures]);
+
+  React.useEffect(() => {
+    localStorage.setItem('sgn_staff_desks', JSON.stringify(staffDesks));
+  }, [staffDesks]);
+
+  React.useEffect(() => {
+    localStorage.setItem('sgn_staff_members', JSON.stringify(staffMembers));
+  }, [staffMembers]);
 
   // Automatically toggle demo mode when demo vendor is active
   React.useEffect(() => {
@@ -858,6 +893,9 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     setNotifications(INITIAL_NOTIFICATIONS);
     setSystemConfig(INITIAL_SYSTEM_CONFIG);
     setIntegrations(INITIAL_INTEGRATIONS);
+    setMenuFeatures(INITIAL_MENU_FEATURES);
+    setStaffDesks(INITIAL_STAFF_DESKS);
+    setStaffMembers(INITIAL_STAFF_MEMBERS);
     localStorage.clear();
   };
 
@@ -919,6 +957,13 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     integrations,
     selectedAuditActor,
     setSelectedAuditActor,
+    
+    staffMembers,
+    setStaffMembers,
+    staffDesks,
+    setStaffDesks,
+    menuFeatures,
+    setMenuFeatures,
 
     // Calculations
     computedStats,
@@ -1313,6 +1358,44 @@ function AIAnalystRoute() {
 
 function DiagnosticsRoute() {
   return <SCIDiagnosticsView />;
+}
+
+function StaffRolesRoute() {
+  const { staffMembers, setStaffMembers, staffDesks, setStaffDesks, menuFeatures, currentAdmin } = useLifecycle();
+  return (
+    <StaffManagementView
+      staffMembers={staffMembers}
+      onUpdateStaffMembers={setStaffMembers}
+      staffDesks={staffDesks}
+      onUpdateStaffDesks={setStaffDesks}
+      menuFeatures={menuFeatures}
+      currentAdmin={currentAdmin}
+    />
+  );
+}
+
+function MenuFeaturesRoute() {
+  const { menuFeatures, setMenuFeatures, currentAdmin } = useLifecycle();
+  
+  const handleAddMenuFeature = (feat: MenuFeature) => {
+    setMenuFeatures((prev: MenuFeature[]) => [feat, ...prev]);
+  };
+  const handleUpdateMenuFeature = (feat: MenuFeature) => {
+    setMenuFeatures((prev: MenuFeature[]) => prev.map(f => f.id === feat.id ? feat : f));
+  };
+  const handleDeleteMenuFeature = (id: string) => {
+    setMenuFeatures((prev: MenuFeature[]) => prev.filter(f => f.id !== id));
+  };
+
+  return (
+    <MenuFeaturesView
+      menuFeatures={menuFeatures}
+      onAddMenuFeature={handleAddMenuFeature}
+      onUpdateMenuFeature={handleUpdateMenuFeature}
+      onDeleteMenuFeature={handleDeleteMenuFeature}
+      currentAdmin={currentAdmin}
+    />
+  );
 }
 
 /* ==========================================================================

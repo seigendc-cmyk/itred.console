@@ -9,7 +9,10 @@ import {
   FinanceRecord,
   AppNotification,
   SystemConfig,
-  IntegrationService
+  IntegrationService,
+  MenuFeature,
+  StaffDesk,
+  StaffMember
 } from './types';
 
 export const MOCK_COMPANIES = [
@@ -178,3 +181,30 @@ export const INITIAL_INTEGRATIONS: IntegrationService[] = [
   { id: 'INT-04', name: 'Global Swift Bridge', category: 'Banking Gateway', status: 'Disconnected', lastSync: '2026-06-30 12:00:00' },
   { id: 'INT-05', name: 'Stripe Corporate Clearing', category: 'Merchant Aggregator', status: 'Connected', lastSync: '2026-07-01 07:48:00' }
 ];
+
+export const INITIAL_MENU_FEATURES: MenuFeature[] = [
+  { id: 'dashboard', label: 'Dashboard', category: 'General', description: 'Access main monitoring metrics and lifecycle shortcuts.' },
+  { id: 'vendors', label: 'Vendor Management', category: 'Operations', description: 'Register, review, edit, and approve enterprise vendors.' },
+  { id: 'plans', label: 'Plans & Pricing', category: 'Licensing', description: 'Configure billing schedules and capacity tier slabs.' },
+  { id: 'pos', label: 'POS Licensing', category: 'Licensing', description: 'Issue, suspend, revoke and inspect terminal hardware clearance keys.' },
+  { id: 'apps', label: 'App Licensing', category: 'Licensing', description: 'Manage ecosystem suite application integrations.' },
+  { id: 'activations', label: 'Activation Requests', category: 'Security', description: 'Authorize incoming hardware TPM credentials.' },
+  { id: 'rpn', label: 'RPN Management', category: 'Operations', description: 'Administer relay processing nodes and client transits.' },
+  { id: 'finance', label: 'Finance', category: 'Operations', description: 'Track transactional records and ledger balances.' },
+  { id: 'staff_roles', label: 'Staff Desks & Roles', category: 'Security', description: 'Manage employee workspace dashboards and desk tree permissions.' },
+  { id: 'menu_features', label: 'Menu Features Registry', category: 'Security', description: 'Define structural access menus and route binds.' },
+  { id: 'settings', label: 'System Settings', category: 'General', description: 'Manage daemon heartbeat rates and system variables.' },
+  { id: 'notifications', label: 'Notifications', category: 'General', description: 'Review system alert broadcasts and logs.' }
+];
+
+export const INITIAL_STAFF_DESKS: StaffDesk[] = [
+  { id: 'DESK-001', name: 'Master Operations Console', status: 'Active', ipAddress: '10.0.0.1', location: 'London Co-Loc', menuAccessIds: ['dashboard', 'vendors', 'plans', 'pos', 'apps', 'activations', 'rpn', 'finance', 'staff_roles', 'menu_features', 'settings', 'notifications'] },
+  { id: 'DESK-002', name: 'Standard Clerk Desk', status: 'Active', ipAddress: '10.0.1.25', location: 'Branch Alpha', menuAccessIds: ['dashboard', 'vendors', 'notifications'] }
+];
+
+export const INITIAL_STAFF_MEMBERS: StaffMember[] = [
+  { id: 'STF-001', name: 'S. Kaelis', role: 'Lead SysOp', email: 'kaelis@itred.seigen', status: 'Active', hasEmployeeCreationAccess: true, deskId: 'DESK-001', welcomeMessage: 'Welcome to the Master Ops node, Lead SysOp Kaelis.' },
+  { id: 'STF-002', name: 'M. Vance', role: 'Security Architect', email: 'vance@itred.seigen', status: 'Active', hasEmployeeCreationAccess: true, deskId: 'DESK-001', welcomeMessage: 'Security protocols active. System secure.' },
+  { id: 'STF-003', name: 'K. Chen', role: 'Operations Assistant', email: 'chen@itred.seigen', status: 'Active', hasEmployeeCreationAccess: false, deskId: 'DESK-002', welcomeMessage: 'Clerk terminal active. Direct routing enabled.' }
+];
+
