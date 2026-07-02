@@ -61,6 +61,25 @@ interface CustomPlatformPlan {
 
 const INITIAL_PLATFORM_PLANS: CustomPlatformPlan[] = [
   {
+    id: 'PLN-VENDOR-DEMO',
+    name: 'Vendor Demo',
+    targetBusiness: 'Sales Demo • Testing Environment • Non-Production Sandboxed Operations',
+    price: 0,
+    description: 'Explore the full iTredPOS and SCI control ecosystem on your local device without database writes.',
+    limits: {
+      businesses: '1 Demo Business',
+      branches: '1 Branch',
+      terminals: '1 POS Terminal',
+      staff: '2 Staff',
+      products: '50 Products',
+      customers: '20 Customers'
+    },
+    modules: [
+      'POS Demo', 'Inventory Demo', 'Sales Demo', 'Receipts Preview', 'Staff Access Demo', 'Branch Demo', 'Dashboard Preview', 'Pricing Preview', 'Vendor Onboarding Preview'
+    ],
+    status: 'Active'
+  },
+  {
     id: 'PLN-STARTER',
     name: 'Starter',
     targetBusiness: 'Tuckshops • Home Businesses • Hair Salons • Market Traders • Small Workshops',
@@ -305,12 +324,43 @@ const FEATURE_PRESETS_CATEGORIES: Record<string, string[]> = {
 };
 
 export default function PlansPricingView() {
-  const { vendors, currentAdmin, addLogAndNotify } = useLifecycle();
+  const { 
+    vendors, 
+    currentAdmin, 
+    addLogAndNotify,
+    isDemoActive,
+    startVendorDemo,
+    resetDemoData,
+    convertDemoToPaidPlan
+  } = useLifecycle();
 
   // 1. Core State
   const [plans, setPlans] = useState<CustomPlatformPlan[]>(() => {
     const saved = localStorage.getItem('sci_platform_plans');
-    return saved ? JSON.parse(saved) : INITIAL_PLATFORM_PLANS;
+    let loadedPlans = saved ? JSON.parse(saved) : INITIAL_PLATFORM_PLANS;
+    if (!loadedPlans.some((p: any) => p.id === 'PLN-VENDOR-DEMO')) {
+      const demoPlan: CustomPlatformPlan = {
+        id: 'PLN-VENDOR-DEMO',
+        name: 'Vendor Demo',
+        targetBusiness: 'Sales Demo • Testing Environment • Non-Production Sandboxed Operations',
+        price: 0,
+        description: 'Explore the full iTredPOS and SCI control ecosystem on your local device without database writes.',
+        limits: {
+          businesses: '1 Demo Business',
+          branches: '1 Branch',
+          terminals: '1 POS Terminal',
+          staff: '2 Staff',
+          products: '50 Products',
+          customers: '20 Customers'
+        },
+        modules: [
+          'POS Demo', 'Inventory Demo', 'Sales Demo', 'Receipts Preview', 'Staff Access Demo', 'Branch Demo', 'Dashboard Preview', 'Pricing Preview', 'Vendor Onboarding Preview'
+        ],
+        status: 'Active'
+      };
+      loadedPlans = [demoPlan, ...loadedPlans.filter((p: any) => p.id !== 'PLN-VENDOR-DEMO')];
+    }
+    return loadedPlans;
   });
 
   const [capacities, setCapacities] = useState<CapacityUpgrade[]>(() => {
@@ -974,6 +1024,144 @@ export default function PlansPricingView() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
           {plans.map(plan => {
             const isInactive = plan.status === 'Inactive';
+            const isDemo = plan.id === 'PLN-VENDOR-DEMO';
+            if (isDemo) {
+              const expiresAtStr = localStorage.getItem('sci_demo_expires_at');
+              let daysRemaining = 7;
+              if (expiresAtStr) {
+                const expiresAt = new Date(expiresAtStr);
+                const diffTime = expiresAt.getTime() - new Date().getTime();
+                daysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+              }
+              
+              return (
+                <div
+                  key={plan.id}
+                  className={`bg-[#F9F9F6] border-2 border-[#FF5A00] flex flex-col justify-between relative rounded-none shadow-md transition-all`}
+                >
+                  {/* Status Bar */}
+                  <div className="h-1.5 bg-[#FF5A00]" />
+
+                  {/* Plan Content */}
+                  <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                    
+                    {/* Name & Target */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-start">
+                        <h3 className="text-lg font-black text-[#1A1A1A] uppercase tracking-tight">{plan.name}</h3>
+                        <span className="px-1.5 py-0.5 text-[8px] font-mono font-black uppercase bg-orange-100 border border-[#FF5A00] text-[#FF5A00]">
+                          DEMO / LOCAL ONLY
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-[#FF5A00] font-mono uppercase tracking-tighter leading-snug min-h-[30px] line-clamp-2">
+                        {plan.targetBusiness}
+                      </div>
+                    </div>
+
+                    {/* Pricing Box */}
+                    <div className="bg-[#1A1A1A] p-3 border border-[#1A1A1A] font-mono text-center text-white">
+                      <div className="flex items-baseline justify-center">
+                        <span className="text-3xl font-sans font-black text-[#FF5A00]">$0</span>
+                        <span className="text-[10px] text-gray-300 uppercase font-bold ml-1">/ 7-Day Demo</span>
+                      </div>
+                      <div className="text-[8px] text-gray-400 uppercase mt-1">NO CONTRACT • LOCAL ONLY</div>
+                    </div>
+
+                    {/* Warning Notice */}
+                    <div className="bg-orange-50 border-l-2 border-[#FF5A00] p-2 text-[10px] text-orange-800 font-sans leading-normal">
+                      <strong>Warning:</strong> Demo data is stored locally on this device only and will not be saved to the SCI cloud database.
+                    </div>
+
+                    {/* Expiry Indicator */}
+                    {isDemoActive && (
+                      <div className="bg-emerald-50 border border-emerald-300 p-2 text-center text-[11px] font-mono font-bold text-emerald-800">
+                        {daysRemaining > 0 ? `${daysRemaining} days remaining` : 'Demo Expired'}
+                      </div>
+                    )}
+
+                    {/* Business Limits List */}
+                    <div className="border-t border-dashed border-[#D1D1CF] pt-3 space-y-1 text-xs">
+                      <span className="text-[9px] font-mono font-black text-gray-400 uppercase tracking-wider block mb-2">DEMO LIMITS:</span>
+                      <div className="flex justify-between text-gray-700">
+                        <span className="font-mono text-[10px]">Demo Business</span>
+                        <strong className="text-gray-950 font-sans font-bold">{plan.limits.businesses}</strong>
+                      </div>
+                      <div className="flex justify-between text-gray-700">
+                        <span className="font-mono text-[10px]">Branch</span>
+                        <strong className="text-gray-950 font-sans font-bold">{plan.limits.branches}</strong>
+                      </div>
+                      <div className="flex justify-between text-gray-700">
+                        <span className="font-mono text-[10px]">POS Terminal</span>
+                        <strong className="text-gray-950 font-sans font-bold">{plan.limits.terminals}</strong>
+                      </div>
+                      <div className="flex justify-between text-gray-700">
+                        <span className="font-mono text-[10px]">Staff Roles</span>
+                        <strong className="text-gray-950 font-sans font-bold">{plan.limits.staff}</strong>
+                      </div>
+                      <div className="flex justify-between text-gray-700">
+                        <span className="font-mono text-[10px]">Products</span>
+                        <strong className="text-gray-950 font-sans font-bold">{plan.limits.products}</strong>
+                      </div>
+                      <div className="flex justify-between text-gray-700">
+                        <span className="font-mono text-[10px]">Customers</span>
+                        <strong className="text-gray-950 font-sans font-bold">{plan.limits.customers}</strong>
+                      </div>
+                    </div>
+
+                    {/* Included modules */}
+                    <div className="border-t border-[#D1D1CF] pt-3 space-y-1">
+                      <span className="text-[9px] font-mono font-black text-gray-400 uppercase tracking-wider block">INCLUDED DEMO SCOPE:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {plan.modules.slice(0, 4).map((mod, idx) => (
+                          <span key={idx} className="bg-gray-100 text-[#1A1A1A] border border-gray-300 text-[9px] px-1 py-0.5 uppercase font-mono tracking-tighter">
+                            {mod}
+                          </span>
+                        ))}
+                        {plan.modules.length > 4 && (
+                          <span className="text-[9px] text-[#FF5A00] font-mono font-black py-0.5 pl-1">
+                            +{plan.modules.length - 4} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Actions */}
+                  <div className="p-3 bg-gray-50 border-t border-[#D1D1CF] flex flex-col gap-1.5">
+                    <button
+                      onClick={startVendorDemo}
+                      disabled={isDemoActive}
+                      className={`w-full py-1.5 px-2 text-[10px] font-mono font-bold uppercase text-center transition-colors border cursor-pointer ${
+                        isDemoActive
+                          ? 'bg-emerald-100 border-emerald-300 text-emerald-800 cursor-not-allowed'
+                          : 'bg-[#FF5A00] border-[#FF5A00] text-white hover:bg-[#E04F00]'
+                      }`}
+                    >
+                      {isDemoActive ? '✓ Demo Mode Active' : 'Start Demo'}
+                    </button>
+                    <button
+                      onClick={convertDemoToPaidPlan}
+                      className="w-full bg-[#1A1A1A] border border-[#1A1A1A] hover:bg-stone-800 text-white py-1.5 px-2 text-[10px] font-mono font-bold uppercase transition-colors text-center cursor-pointer"
+                    >
+                      Convert to Paid Plan
+                    </button>
+                    <button
+                      onClick={resetDemoData}
+                      disabled={!isDemoActive}
+                      className={`w-full py-1.5 px-2 text-[10px] font-mono font-bold uppercase text-center transition-colors border cursor-pointer ${
+                        !isDemoActive
+                          ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
+                          : 'bg-white border-red-300 text-red-600 hover:bg-red-50'
+                      }`}
+                    >
+                      Reset Demo Data
+                    </button>
+                  </div>
+
+                </div>
+              );
+            }
             return (
               <div
                 key={plan.id}

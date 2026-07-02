@@ -37,6 +37,20 @@ export const INITIAL_VENDORS: Vendor[] = [
 
 export const INITIAL_PLANS: Plan[] = [
   {
+    id: 'VENDOR_DEMO',
+    name: 'Vendor Demo',
+    type: 'POS',
+    price: 0,
+    interval: 'Monthly',
+    activeVendors: 0,
+    enabledApps: ['Core POS', 'Basic Inventory', 'Audit Trails'],
+    maxBranches: '1',
+    maxTerminals: '1',
+    maxStaff: '2',
+    maxProducts: '50',
+    status: 'Active'
+  },
+  {
     id: 'PLN-POS-STARTER',
     name: 'Starter POS',
     type: 'POS',

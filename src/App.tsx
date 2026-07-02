@@ -138,6 +138,7 @@ export default function App() {
    LIFECYCLE STATE & PROVIDER ENGINE
    ========================================================================== */
 function LifecycleProvider({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
   // Authentication & Onboarding state
   const [isGoogleLoggedIn, setIsGoogleLoggedIn] = useState(false);
   const [googleEmail, setGoogleEmail] = useState(() => {
@@ -147,15 +148,58 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
   const [currentAdmin, setCurrentAdmin] = useState(MOCK_ADMINS[0]);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Demo Mode states
+  const [isDemoActive, setIsDemoActive] = useState<boolean>(() => {
+    return localStorage.getItem('sci_demo_mode') === 'true';
+  });
+
+  const [demoVendor, setDemoVendor] = useState<Vendor | null>(() => {
+    const saved = localStorage.getItem('sci_demo_vendor');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   // Core Entity Database Lists
   const [vendors, setVendors] = useState<Vendor[]>(() => {
     const saved = localStorage.getItem('sgn_vendors');
-    return saved ? JSON.parse(saved) : INITIAL_VENDORS;
+    let loadedVendors = saved ? JSON.parse(saved) : INITIAL_VENDORS;
+    const isDemo = localStorage.getItem('sci_demo_mode') === 'true';
+    if (isDemo) {
+      const savedDemoVendor = localStorage.getItem('sci_demo_vendor');
+      if (savedDemoVendor) {
+        const parsedDemo = JSON.parse(savedDemoVendor);
+        if (!loadedVendors.some((v: any) => v.id === parsedDemo.id)) {
+          loadedVendors = [parsedDemo, ...loadedVendors];
+        }
+      }
+    }
+    return loadedVendors;
   });
   const [plans, setPlans] = useState<Plan[]>(INITIAL_PLANS);
   const [posLicenses, setPosLicenses] = useState<POSLicense[]>(() => {
     const saved = localStorage.getItem('sgn_pos_licenses');
-    return saved ? JSON.parse(saved) : INITIAL_POS_LICENSES;
+    let loadedLicenses = saved ? JSON.parse(saved) : INITIAL_POS_LICENSES;
+    const isDemo = localStorage.getItem('sci_demo_mode') === 'true';
+    if (isDemo) {
+      const demoLicId = 'DEMO-LIC-9999';
+      if (!loadedLicenses.some((l: any) => l.id === demoLicId)) {
+        const newDemoLicense: POSLicense = {
+          id: demoLicId,
+          vendorName: 'Alpha Demo Store',
+          terminalId: 'TRM-DEMO-001',
+          licenseKey: 'ITRD-POS-DEMO-9999-ABCD',
+          status: 'Active',
+          issuedAt: new Date().toISOString().split('T')[0],
+          planName: 'Vendor Demo',
+          expiryDate: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0],
+          notes: 'Local Demo Bounded Terminal Sandbox',
+          billingCycle: 'Monthly',
+          tokenPrice: 0,
+          collectionTag: 'Demo Sandbox'
+        };
+        loadedLicenses = [newDemoLicense, ...loadedLicenses];
+      }
+    }
+    return loadedLicenses;
   });
   const [appLicenses, setAppLicenses] = useState<AppLicense[]>(() => {
     const saved = localStorage.getItem('sgn_app_licenses');
@@ -248,6 +292,122 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
       read: false
     };
     setNotifications(prev => [newNotif, ...prev]);
+  };
+
+  // Demo Environment Actions
+  const startVendorDemo = () => {
+    const now = new Date();
+    const expires = new Date();
+    expires.setDate(now.getDate() + 7);
+    
+    // Set local storage keys
+    localStorage.setItem('sci_demo_mode', 'true');
+    localStorage.setItem('sci_demo_started_at', now.toISOString());
+    localStorage.setItem('sci_demo_expires_at', expires.toISOString());
+    
+    const newDemoVendor: Vendor = {
+      id: 'V-DEMO-99',
+      name: 'Alpha Demo Store',
+      tradingName: 'Alpha Demo Operations',
+      category: 'Convenience Stores',
+      status: 'Active',
+      email: 'demo@sci-local.internal',
+      code: 'DEMO-99',
+      joinedDate: now.toISOString().split('T')[0],
+      location: 'Local Storage Sandbox',
+      assignedPlanId: 'VENDOR_DEMO',
+      assignedPlanName: 'Vendor Demo',
+      licenseKey: 'DEMO-LICENSE-KEY-9999'
+    };
+    
+    localStorage.setItem('sci_demo_vendor', JSON.stringify(newDemoVendor));
+    
+    // Set state
+    setIsDemoActive(true);
+    setDemoVendor(newDemoVendor);
+    
+    setVendors(prev => {
+      if (prev.some(v => v.id === 'V-DEMO-99')) return prev;
+      return [newDemoVendor, ...prev];
+    });
+
+    const newDemoLicense: POSLicense = {
+      id: 'DEMO-LIC-9999',
+      vendorName: 'Alpha Demo Store',
+      terminalId: 'TRM-DEMO-001',
+      licenseKey: 'ITRD-POS-DEMO-9999-ABCD',
+      status: 'Active',
+      issuedAt: now.toISOString().split('T')[0],
+      planName: 'Vendor Demo',
+      expiryDate: expires.toISOString().split('T')[0],
+      notes: 'Local Demo Bounded Terminal Sandbox',
+      billingCycle: 'Monthly',
+      tokenPrice: 0,
+      collectionTag: 'Demo Sandbox'
+    };
+    setPosLicenses(prev => {
+      if (prev.some(l => l.id === 'DEMO-LIC-9999')) return prev;
+      return [newDemoLicense, ...prev];
+    });
+    
+    // Add mock demo data to sci_demo_data
+    const mockDemoData = {
+      productsCount: 15,
+      customersCount: 8,
+      salesCount: 12,
+      purchasesCount: 4,
+      staffCount: 2
+    };
+    localStorage.setItem('sci_demo_data', JSON.stringify(mockDemoData));
+
+    // Audit log and Notification
+    addLogAndNotify(
+      'SYSTEM_DAEMON',
+      'ACTIVATE_DEMO_MODE',
+      'Local Sandbox environment initialized',
+      'Success',
+      'success',
+      'Demo Mode Activated',
+      'Sales demo plan started. Storage redirected to local storage sandbox only. Firebase writes disabled.'
+    );
+  };
+
+  const resetDemoData = () => {
+    // Clear demo localStorage keys
+    localStorage.removeItem('sci_demo_mode');
+    localStorage.removeItem('sci_demo_vendor');
+    localStorage.removeItem('sci_demo_data');
+    localStorage.removeItem('sci_demo_started_at');
+    localStorage.removeItem('sci_demo_expires_at');
+    
+    // Reset state
+    setIsDemoActive(false);
+    setDemoVendor(null);
+    
+    // Remove the demo vendor from vendors list
+    setVendors(prev => prev.filter(v => v.id !== 'V-DEMO-99'));
+    // Remove demo license from licenses list
+    setPosLicenses(prev => prev.filter(l => l.id !== 'DEMO-LIC-9999'));
+
+    addLogAndNotify(
+      'SYSTEM_DAEMON',
+      'RESET_DEMO_MODE',
+      'Local Sandbox environment cleared',
+      'Success',
+      'info',
+      'Demo Mode Reset',
+      'Local demo data cleared from this device. Storage settings restored.'
+    );
+  };
+
+  const convertDemoToPaidPlan = () => {
+    navigate('/plans');
+    setTimeout(() => {
+      const el = document.getElementById('section_licensing_simulator');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
   };
 
   // State modifiers
@@ -689,9 +849,11 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
 
   // Dynamically calculate metrics
   const computedStats = useMemo(() => {
-    const totalVendorsCount = vendors.length;
+    const productionVendors = vendors.filter(v => v.assignedPlanId !== 'VENDOR_DEMO');
+    const totalVendorsCount = productionVendors.length;
     const pendingActivationsCount = activationRequests.filter(r => r.status === 'Pending').length;
-    const activePOSCount = posLicenses.filter(lic => lic.status === 'Active').length;
+    const productionLicenses = posLicenses.filter(lic => lic.planName !== 'Vendor Demo' && !lic.id.startsWith('DEMO-'));
+    const activePOSCount = productionLicenses.filter(lic => lic.status === 'Active').length;
     
     const totalCreditsSum = financeRecords
       .filter(rec => rec.type === 'Credit')
@@ -699,7 +861,7 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     const revenueThisMonthStr = `$${totalCreditsSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     const onlineRPNAgentsCount = rpnAgents.filter(agent => agent.connectionStatus === 'Connected').length;
-    const pendingVerificationsCount = vendors.filter(v => v.status === 'Pending Verification').length;
+    const pendingVerificationsCount = productionVendors.filter(v => v.status === 'Pending Verification').length;
 
     return {
       totalVendors: totalVendorsCount,
@@ -766,7 +928,14 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     handleMarkAllRead,
     handleClearNotifications,
     handleToggleRead,
-    handleResetState
+    handleResetState,
+
+    // Demo Mode States & Actions
+    isDemoActive,
+    demoVendor,
+    startVendorDemo,
+    resetDemoData,
+    convertDemoToPaidPlan
   };
 
   return (
@@ -831,7 +1000,8 @@ function RequireAuthLayout() {
     searchQuery,
     setSearchQuery,
     handleResetState,
-    vendors
+    vendors,
+    isDemoActive
   } = useLifecycle();
 
   const location = useLocation();
@@ -864,6 +1034,17 @@ function RequireAuthLayout() {
   return (
     <div id="itred_control_console" className="flex h-screen bg-[#F4F4F1] text-[#1A1A1A] font-sans overflow-hidden select-none relative">
       
+      {/* DEMO MODE Watermark Overlay */}
+      {isDemoActive && (
+        <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden opacity-[0.03] select-none flex items-center justify-center flex-wrap gap-12 rotate-[-15deg]">
+          {Array.from({ length: 60 }).map((_, i) => (
+            <div key={i} className="text-4xl font-mono font-black uppercase tracking-widest whitespace-nowrap">
+              DEMO MODE • LOCAL ONLY
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 1. LEFT SIDEBAR NAVIGATION */}
       <Sidebar
         activeTab={activeTab}
@@ -890,6 +1071,7 @@ function RequireAuthLayout() {
           searchQuery={searchQuery}
           googleEmail={googleEmail}
           vendors={vendors}
+          isDemoActive={isDemoActive}
         />
 
         {/* WORKING AREA WORKING CANVAS */}

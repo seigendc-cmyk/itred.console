@@ -14,6 +14,7 @@ interface ToolbarProps {
   searchQuery: string;
   googleEmail?: string;
   vendors?: any[];
+  isDemoActive?: boolean;
 }
 
 export default function Toolbar({
@@ -26,7 +27,8 @@ export default function Toolbar({
   onSearch,
   searchQuery,
   googleEmail = 'seigendc@gmail.com',
-  vendors = []
+  vendors = [],
+  isDemoActive = false
 }: ToolbarProps) {
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
@@ -34,10 +36,12 @@ export default function Toolbar({
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // Filter businesses belonging to this Google email address
-  const linkedBusinesses = vendors.filter(
-    v => (v.email || '').toLowerCase() === googleEmail.toLowerCase()
-  );
+  // Filter businesses belonging to this Google email address (excluding demo vendors)
+  const linkedBusinesses = vendors
+    .filter(v => v.assignedPlanId !== 'VENDOR_DEMO')
+    .filter(
+      v => (v.email || '').toLowerCase() === googleEmail.toLowerCase()
+    );
 
   return (
     <header id="toolbar_header" className="h-16 border-b border-[#D1D1CF] bg-white flex items-center justify-between px-8 relative z-10 shrink-0">
@@ -65,6 +69,27 @@ export default function Toolbar({
 
       {/* Center/Right controls */}
       <div id="toolbar_actions" className="flex items-center space-x-6">
+        
+        {/* Global Storage Mode Indicator */}
+        <div id="storage_mode_indicator" className="flex items-center space-x-2 border-r border-[#D1D1CF] pr-6">
+          <span className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">Storage Mode:</span>
+          <div className="flex border border-[#D1D1CF] p-0.5 bg-[#F4F4F1] rounded-none">
+            <div className={`px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-wider rounded-none ${
+              isDemoActive 
+                ? 'bg-[#FF5A00] text-white shadow-sm' 
+                : 'bg-transparent text-gray-500 opacity-60'
+            }`}>
+              Local Demo Mode
+            </div>
+            <div className={`px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-wider rounded-none cursor-not-allowed select-none ${
+              !isDemoActive 
+                ? 'bg-gray-400 text-white shadow-sm' 
+                : 'text-gray-400 opacity-40'
+            }`}>
+              Production Cloud Mode
+            </div>
+          </div>
+        </div>
         
         {/* Company Selector */}
         <div id="company_selector" className="relative">
@@ -121,6 +146,36 @@ export default function Toolbar({
                   })
                 )}
               </div>
+
+              {/* Demo Vendors if active */}
+              {vendors.some(v => v.assignedPlanId === 'VENDOR_DEMO') && (
+                <div className="py-1">
+                  <div className="px-2 py-1 text-[8px] font-mono font-bold text-orange-500 uppercase tracking-widest">
+                    DEMO BUSINESSES
+                  </div>
+                  {vendors.filter(v => v.assignedPlanId === 'VENDOR_DEMO').map((biz) => {
+                    const isSelected = currentCompany === biz.name;
+                    return (
+                      <button
+                        key={biz.id}
+                        onClick={() => {
+                          onCompanyChange(biz.name);
+                          setShowCompanyDropdown(false);
+                        }}
+                        className={`w-full text-left px-2 py-1.5 text-xs font-sans uppercase hover:bg-[#FF5A00] hover:text-white flex items-center justify-between transition-colors rounded-none ${
+                          isSelected ? 'text-[#FF5A00] font-bold' : 'text-[#1A1A1A]'
+                        }`}
+                      >
+                        <div className="truncate flex flex-col items-start">
+                          <span className="truncate">{biz.name}</span>
+                          <span className="text-[8px] font-mono text-orange-400 lowercase normal-case">{biz.id} • LOCAL DEMO</span>
+                        </div>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-[#FF5A00] shrink-0 ml-2" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Standard Platform Nodes */}
               <div className="py-1">

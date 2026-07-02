@@ -84,7 +84,7 @@ export default function VendorManagementView({
   } = useLifecycle();
 
   // Active workspace section tab
-  const [activeTab, setActiveTab] = useState<'directory' | 'register' | 'admin' | 'pending-view'>('directory');
+  const [activeTab, setActiveTab] = useState<'directory' | 'register' | 'admin' | 'pending-view' | 'demo-vendors'>('directory');
 
   // Form Fields
   const [businessName, setBusinessName] = useState('');
@@ -360,8 +360,10 @@ export default function VendorManagementView({
 
   // Filter vendor list with an advanced multi-word order-independent search engine
   const activeSearchQuery = localSearch || propsSearchQuery;
-  const filteredVendors = vendors.filter(vendor => {
-    const queryWords = activeSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const filteredVendors = vendors
+    .filter(vendor => vendor.assignedPlanId !== 'VENDOR_DEMO')
+    .filter(vendor => {
+      const queryWords = activeSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
     if (queryWords.length === 0) return true;
     
     // Combine all searchable text fields for the vendor
@@ -499,6 +501,19 @@ export default function VendorManagementView({
             )}
           </button>
 
+          <button
+            id="tab_demo_vendors"
+            onClick={() => setActiveTab('demo-vendors')}
+            className={`px-4 py-2 text-xs font-mono font-bold uppercase transition-all duration-150 rounded-none cursor-pointer border flex items-center space-x-1.5 ${
+              activeTab === 'demo-vendors' 
+                ? 'bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-md' 
+                : 'bg-white text-gray-600 border-[#D1D1CF] hover:bg-gray-100'
+            }`}
+          >
+            <Building className="w-3.5 h-3.5" />
+            <span>Demo Vendors</span>
+          </button>
+
           {lastSubmittedVendorId && (
             <button
               id="tab_pending_view"
@@ -612,7 +627,7 @@ export default function VendorManagementView({
             </div>
             
             <div className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
-              Displaying {filteredVendors.length} of {vendors.length} Total Registry Blocks
+              Displaying {filteredVendors.length} of {vendors.filter(v => v.assignedPlanId !== 'VENDOR_DEMO').length} Total Registry Blocks
             </div>
           </div>
 
@@ -1232,6 +1247,109 @@ export default function VendorManagementView({
 
 
       {/* ==========================================================================
+         DEMO VENDORS VIEW
+         ========================================================================== */}
+      {activeTab === 'demo-vendors' && (
+        <div id="workspace_demo_vendors" className="space-y-6">
+          <div className="bg-orange-50 border-2 border-[#FF5A00] p-6 text-xs shadow-sm">
+            <h3 className="text-sm font-black text-[#FF5A00] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Building className="w-4 h-4" />
+              <span>Local Sandbox: Demo Vendors Directory</span>
+            </h3>
+            <p className="text-gray-700 leading-relaxed font-sans mb-3">
+              These vendors exist purely in your browser's local state sandbox. They do not persist to Firebase, consume active production POS licenses, or sync to any production database.
+            </p>
+            <div className="flex flex-wrap gap-4 font-mono text-[11px] text-orange-950 bg-orange-100/50 p-3 border border-orange-200">
+              <div><strong>Storage Node:</strong> LocalStorage Sandbox</div>
+              <div><strong>Status:</strong> Sandbox Active</div>
+              <div><strong>Firebase Sync:</strong> Disabled (Local-Only State Bounded)</div>
+            </div>
+          </div>
+
+          {/* Table of Demo Vendors */}
+          <div className="bg-white border-2 border-[#1A1A1A] shadow-sm">
+            <div className="p-4 border-b border-[#D1D1CF] bg-gray-50 flex items-center justify-between">
+              <span className="font-mono text-xs font-bold text-gray-700">LOCAL SANDBOX VENDORS</span>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse font-sans text-xs">
+                <thead>
+                  <tr className="bg-[#1A1A1A] text-white font-mono uppercase text-[10px] tracking-wider border-b border-[#1A1A1A]">
+                    <th className="p-3">Reference / Code</th>
+                    <th className="p-3">Business Entity Details</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3">Location & Phone</th>
+                    <th className="p-3">Integrations</th>
+                    <th className="p-3">Compliance Status</th>
+                    <th className="p-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#D1D1CF]">
+                  {vendors.filter(v => v.assignedPlanId === 'VENDOR_DEMO').length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-12 text-center text-gray-400 uppercase font-bold text-xs bg-gray-50 font-mono">
+                        NO DEMO VENDORS ACTIVE. PLEASE GO TO "PLANS & PRICING" AND START A VENDOR DEMO.
+                      </td>
+                    </tr>
+                  ) : (
+                    vendors.filter(v => v.assignedPlanId === 'VENDOR_DEMO').map((vendor) => (
+                      <tr key={vendor.id} className="hover:bg-[#F9F9F8] transition-colors bg-orange-50/10">
+                        <td className="p-3 align-middle">
+                          <div className="font-bold text-[#1A1A1A] text-sm">{vendor.id}</div>
+                          <div className="text-[10px] text-[#FF5A00] font-bold uppercase">{vendor.code}</div>
+                        </td>
+                        <td className="p-3 align-middle font-sans">
+                          <div className="font-bold text-[#1A1A1A] text-sm">{vendor.name}</div>
+                          {vendor.tradingName && vendor.tradingName !== vendor.name && (
+                            <div className="text-xs text-gray-500 font-mono uppercase">Trading: {vendor.tradingName}</div>
+                          )}
+                          <div className="text-xs text-gray-400 font-mono lowercase mt-0.5">{vendor.email}</div>
+                        </td>
+                        <td className="p-3 align-middle">
+                          <span className="bg-orange-50 border border-orange-200 text-[#FF5A00] font-bold px-2 py-0.5 text-[10px] uppercase">
+                            {vendor.category}
+                          </span>
+                        </td>
+                        <td className="p-3 align-middle font-mono">
+                          <div className="text-gray-700 font-bold">{vendor.location}</div>
+                          <div className="text-[10px] text-gray-400 mt-0.5">{vendor.phone || 'No phone bind'}</div>
+                        </td>
+                        <td className="p-3 align-middle">
+                          <div className="flex flex-wrap gap-1 max-w-xs">
+                            {['Core POS', 'Basic Inventory', 'Audit Trails'].map((app) => (
+                              <span key={app} className="bg-orange-100/50 text-[#FF5A00] border border-orange-200 text-[8px] font-bold uppercase px-1.5 py-0.2">
+                                {app}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="text-[9px] text-[#FF5A00] font-bold uppercase mt-1">
+                            PLAN: {vendor.assignedPlanName}
+                          </div>
+                        </td>
+                        <td className="p-3 align-middle">
+                          <span className="px-2 py-1 font-black text-[9px] uppercase inline-flex items-center border bg-emerald-50 text-emerald-700 border-emerald-300">
+                            <span className="w-1.5 h-1.5 mr-1.5 bg-green-500 rounded-full animate-pulse" />
+                            {vendor.status}
+                          </span>
+                        </td>
+                        <td className="p-3 align-middle text-right">
+                          <span className="text-[10px] font-mono text-gray-400 uppercase italic">
+                            Demo Mode Sandboxed
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* ==========================================================================
          D. ADMIN CONSOLE VIEW (APPROVE, REJECT, ASSIGN PLAN, ISSUE LICENSE)
          ========================================================================== */}
       {activeTab === 'admin' && (
@@ -1246,7 +1364,7 @@ export default function VendorManagementView({
               </div>
               
               <div className="max-h-[500px] overflow-y-auto divide-y divide-[#D1D1CF]">
-                {vendors.map((vendor) => {
+                {vendors.filter(v => v.assignedPlanId !== 'VENDOR_DEMO').map((vendor) => {
                   const isSelected = vendor.id === selectedAdminVendorId;
                   return (
                     <div
