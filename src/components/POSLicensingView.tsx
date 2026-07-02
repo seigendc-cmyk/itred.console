@@ -1,6 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useLifecycle } from '../App';
 import { POSLicense, Vendor, Plan, RPNAgent } from '../types';
+import { 
+  issueMockPOSActivation, 
+  getPOSActivationRecords, 
+  updatePOSActivationStatus, 
+  validatePOSActivationForVendor 
+} from '../services/posActivationBridge';
+import { POSActivationRecord } from '../licensing/posActivationTypes';
 import { 
   Terminal, 
   Plus, 
@@ -50,8 +57,8 @@ export default function POSLicensingView() {
     setFinanceRecords
   } = useLifecycle();
 
-  // Active Tab: 'licenses' | 'generator' | 'matrix' | 'rpn-linker'
-  const [activeTab, setActiveTab] = useState<'licenses' | 'generator' | 'matrix' | 'rpn-linker'>('licenses');
+  // Active Tab: 'licenses' | 'activation-bridge' | 'generator' | 'matrix' | 'rpn-linker'
+  const [activeTab, setActiveTab] = useState<'licenses' | 'activation-bridge' | 'generator' | 'matrix' | 'rpn-linker'>('licenses');
 
   // ==========================================================================
   // TAB 1: TERMINAL LICENSES MAIN STATE & HANDLERS
@@ -65,6 +72,43 @@ export default function POSLicensingView() {
   const [formStartDate, setFormStartDate] = useState('2026-07-01');
   const [formExpiryDate, setFormExpiryDate] = useState('2027-07-01');
   const [formNotes, setFormNotes] = useState('');
+
+  // POS Activation Bridge States
+  const [activationRecords, setActivationRecords] = useState<POSActivationRecord[]>(() => getPOSActivationRecords());
+  const [isActivationDrawerOpen, setIsActivationDrawerOpen] = useState(false);
+  const [actVendorId, setActVendorId] = useState('');
+  const [actPlanId, setActPlanId] = useState('');
+  const [actLicenseMode, setActLicenseMode] = useState<'demo' | 'production'>('production');
+  const [actStorageMode, setActStorageMode] = useState<'localOnly' | 'cloud'>('cloud');
+  const [actStartDate, setActStartDate] = useState('2026-07-02');
+  const [actExpiryDate, setActExpiryDate] = useState('2027-07-02');
+  const [actMaxBranches, setActMaxBranches] = useState('1');
+  const [actMaxTerminals, setActMaxTerminals] = useState('1');
+  const [actMaxStaff, setActMaxStaff] = useState('3');
+  const [actMaxProducts, setActMaxProducts] = useState('500');
+  const [actNotes, setActNotes] = useState('');
+  
+  const [validateVendorId, setValidateVendorId] = useState('');
+  const [validationResult, setValidationResult] = useState<any | null>(null);
+
+  // Synchronize Storage Mode with License Mode automatically
+  useEffect(() => {
+    if (actLicenseMode === 'demo') {
+      setActStorageMode('localOnly');
+    } else {
+      setActStorageMode('cloud');
+    }
+  }, [actLicenseMode]);
+
+  // Synchronize Capacity Limits with Plan automatically
+  useEffect(() => {
+    const plan = plans.find(p => p.id === actPlanId);
+    if (!plan) return;
+    setActMaxBranches(plan.maxBranches || '1');
+    setActMaxTerminals(plan.maxTerminals || '1');
+    setActMaxStaff(plan.maxStaff || '3');
+    setActMaxProducts(plan.maxProducts || '500');
+  }, [actPlanId, plans]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
@@ -92,6 +136,69 @@ export default function POSLicensingView() {
     setFormExpiryDate('2027-07-01');
     setFormNotes('');
     setIsDrawerOpen(true);
+  };
+
+  const handleActivationSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const vendor = vendors.find((v: Vendor) => v.id === actVendorId);
+    const plan = plans.find((p: Plan) => p.id === actPlanId);
+
+    if (!vendor) {
+      alert("Please select a vendor.");
+      return;
+    }
+    if (!plan) {
+      alert("Please select a plan.");
+      return;
+    }
+
+    const finalStorageMode = actLicenseMode === 'demo' ? 'localOnly' : 'cloud';
+
+    const parseLimit = (val: string) => {
+      if (val === 'Unlimited' || val === 'unlimited') return 9999;
+      return parseInt(val) || 1;
+    };
+
+    const newRecord = issueMockPOSActivation({
+      vendorId: vendor.id,
+      vendorName: vendor.name,
+      planId: plan.id,
+      planName: plan.name,
+      licenseMode: actLicenseMode,
+      storageMode: finalStorageMode,
+      maxBranches: parseLimit(actMaxBranches),
+      maxTerminals: parseLimit(actMaxTerminals),
+      maxStaff: parseLimit(actMaxStaff),
+      maxProducts: parseLimit(actMaxProducts),
+      startsAt: actStartDate,
+      expiresAt: actExpiryDate,
+      issuedBy: currentAdmin?.name || 'Admin',
+      notes: actNotes
+    });
+
+    setActivationRecords(getPOSActivationRecords());
+    setIsActivationDrawerOpen(false);
+
+    if (addLogAndNotify) {
+      addLogAndNotify(
+        currentAdmin?.name || 'Admin',
+        'ISSUE_POS_ACTIVATION',
+        `${vendor.name} • ${newRecord.licenseId}`,
+        'success',
+        'success',
+        'POS Activation Issued',
+        `Registered activation bridge reference ${newRecord.licenseId} for ${vendor.name}.`
+      );
+    }
+  };
+
+  const handleValidateAccess = () => {
+    if (!validateVendorId) {
+      alert("Please choose a vendor to validate.");
+      return;
+    }
+    const decision = validatePOSActivationForVendor(validateVendorId);
+    setValidationResult(decision);
   };
 
   const handleIssueSubmit = (e: React.FormEvent) => {
@@ -692,6 +799,15 @@ export default function POSLicensingView() {
             1. Terminal Keys
           </button>
           <button
+            id="tab_trigger_activation_bridge"
+            onClick={() => setActiveTab('activation-bridge')}
+            className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
+              activeTab === 'activation-bridge' ? 'bg-[#1A1A1A] text-white' : 'text-gray-600 hover:bg-white/50'
+            }`}
+          >
+            2. POS Activation Bridge
+          </button>
+          <button
             id="tab_trigger_generator"
             onClick={() => setActiveTab('generator')}
             className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
@@ -731,41 +847,47 @@ export default function POSLicensingView() {
           {/* HARDWARE OVERVIEW METRICS */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-gray-400 uppercase text-[9px] font-bold">TOTAL REGISTERED</div>
-              <div className="text-2xl font-black text-[#1A1A1A] mt-1 font-sans">{posLicenses.length}</div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">Gateways bound</div>
+              <div className="text-[#FF5A00] uppercase text-[9px] font-bold">PRODUCTION LICENSES</div>
+              <div className="text-2xl font-black text-[#1A1A1A] mt-1 font-sans">
+                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO')).length}
+              </div>
+              <div className="text-[9px] text-gray-500 mt-1 uppercase">
+                Active: {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && l.status === 'Active').length} Cloud
+              </div>
             </div>
 
             <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-emerald-600 uppercase text-[9px] font-bold">ACTIVE CREDENTIALS</div>
+              <div className="text-orange-600 uppercase text-[9px] font-bold">DEMO LICENSES</div>
+              <div className="text-2xl font-black text-[#1A1A1A] mt-1 font-sans">
+                {posLicenses.filter((l: POSLicense) => l.id.includes('DEMO')).length}
+              </div>
+              <div className="text-[9px] text-gray-500 mt-1 uppercase">
+                Active: {posLicenses.filter((l: POSLicense) => l.id.includes('DEMO') && l.status === 'Active').length} Local
+              </div>
+            </div>
+
+            <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
+              <div className="text-emerald-600 uppercase text-[9px] font-bold">ACTIVE PROD KEYS</div>
               <div className="text-2xl font-black text-emerald-600 mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => l.status === 'Active').length}
+                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && l.status === 'Active').length}
               </div>
               <div className="text-[9px] text-gray-500 mt-1 uppercase">Rotational cycle live</div>
             </div>
 
             <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-amber-600 uppercase text-[9px] font-bold">SUSPENDED KEYS</div>
+              <div className="text-amber-600 uppercase text-[9px] font-bold">SUSPENDED PROD</div>
               <div className="text-2xl font-black text-amber-600 mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => l.status === 'Suspended').length}
+                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && l.status === 'Suspended').length}
               </div>
               <div className="text-[9px] text-gray-500 mt-1 uppercase">Access frozen</div>
             </div>
 
-            <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-red-600 uppercase text-[9px] font-bold">DEACTIVATED</div>
-              <div className="text-2xl font-black text-red-600 mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => l.status === 'Deactivated').length}
-              </div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">Purged from ledger</div>
-            </div>
-
             <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm col-span-2 lg:col-span-1">
-              <div className="text-orange-600 uppercase text-[9px] font-bold">EXPIRED TERMINALS</div>
-              <div className="text-2xl font-black text-orange-600 mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => l.status === 'Expired').length}
+              <div className="text-red-600 uppercase text-[9px] font-bold">EXPIRED / REVOKED PROD</div>
+              <div className="text-2xl font-black text-red-600 mt-1 font-sans">
+                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && (l.status === 'Expired' || l.status === 'Deactivated')).length}
               </div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">Cycle extension needed</div>
+              <div className="text-[9px] text-gray-500 mt-1 uppercase">Purged or out of date</div>
             </div>
           </div>
 
@@ -1002,6 +1124,254 @@ export default function POSLicensingView() {
             <p className="text-gray-400 leading-relaxed">
               Terminal devices are authorized using continuous public-key rotation. Renewals re-align co-location cache vectors, suspensions hold inbound REST packages instantly, and deactivations purge decryption keys permanently from client TPM memory blocks.
             </p>
+          </div>
+        </div>
+      )}
+
+
+      {/* ==========================================================================
+         POS ACTIVATION BRIDGE VIEW
+         ========================================================================== */}
+      {activeTab === 'activation-bridge' && (
+        <div id="subview_activation_bridge" className="space-y-6 animate-fade-in">
+          
+          {/* Header block with actions */}
+          <div className="bg-white border-2 border-[#1A1A1A] p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-bold uppercase text-[#1A1A1A] tracking-wider">POS Activation Bridge Controller</h2>
+              <p className="text-xs text-gray-500 font-sans mt-0.5">Dual-mode licensing authorization & cryptographic validation logs</p>
+            </div>
+            
+            <button
+              onClick={() => {
+                const activeVendors = vendors.filter((v: Vendor) => v.status === 'Active');
+                setActVendorId(activeVendors[0]?.id || (vendors[0]?.id || ''));
+                const posPlans = plans.filter((p: Plan) => p.type === 'POS' || p.type === 'Hybrid');
+                setActPlanId(posPlans[0]?.id || (plans[0]?.id || ''));
+                setActStartDate(new Date().toISOString().split('T')[0]);
+                
+                const expDate = new Date();
+                expDate.setFullYear(expDate.getFullYear() + 1);
+                setActExpiryDate(expDate.toISOString().split('T')[0]);
+                setActNotes('');
+                setIsActivationDrawerOpen(true);
+              }}
+              className="flex items-center space-x-1.5 bg-[#FF5A00] hover:bg-[#1A1A1A] text-white text-[10px] font-sans font-black py-2.5 px-4 uppercase tracking-wider transition-all rounded-none cursor-pointer border-2 border-transparent"
+            >
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span>Issue POS Activation</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Table of Records: Span 2 Columns */}
+            <div className="lg:col-span-2 space-y-4">
+              <div className="bg-white border-2 border-[#1A1A1A] shadow-sm">
+                <div className="p-3 bg-[#F4F4F1] border-b border-[#D1D1CF] font-bold text-[#1A1A1A] uppercase tracking-wider text-xs">
+                  Active POS Activation Registry
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse font-mono text-[11px]">
+                    <thead>
+                      <tr className="bg-[#1A1A1A] text-white uppercase text-[9px] border-b border-[#1A1A1A]">
+                        <th className="p-2.5">License Ref</th>
+                        <th className="p-2.5">Merchant Entity</th>
+                        <th className="p-2.5">Parameters / Mode</th>
+                        <th className="p-2.5">Expiration</th>
+                        <th className="p-2.5">Compliance Status</th>
+                        <th className="p-2.5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#D1D1CF]">
+                      {activationRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-gray-405 italic">
+                            No POS activation bridge records registered.
+                          </td>
+                        </tr>
+                      ) : (
+                        activationRecords.map((record) => (
+                          <tr key={record.licenseId} className="hover:bg-[#F9F9F8]">
+                            <td className="p-2.5 font-bold align-middle">
+                              <div>{record.licenseId}</div>
+                              <div className="text-[9px] text-[#FF5A00] uppercase font-semibold mt-0.5">{record.planName}</div>
+                            </td>
+                            <td className="p-2.5 align-middle">
+                              <div className="font-bold text-[#1A1A1A]">{record.vendorName}</div>
+                              <div className="text-[9px] text-gray-400">ID: {record.vendorId}</div>
+                            </td>
+                            <td className="p-2.5 align-middle">
+                              <div className="flex flex-wrap gap-1">
+                                {record.licenseMode === 'demo' ? (
+                                  <span className="bg-orange-50 border border-orange-200 text-[#FF5A00] font-black px-1.5 py-0.2 text-[8px] uppercase tracking-tight">
+                                    DEMO / LOCAL ONLY
+                                  </span>
+                                ) : (
+                                  <span className="bg-blue-50 border border-blue-200 text-blue-700 font-black px-1.5 py-0.2 text-[8px] uppercase tracking-tight">
+                                    PRODUCTION / CLOUD
+                                  </span>
+                                )}
+                                <span className="bg-stone-100 text-stone-700 border border-stone-200 text-[8px] px-1 py-0.2 font-semibold">
+                                  T:{record.maxTerminals} • B:{record.maxBranches} • S:{record.maxStaff}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-2.5 align-middle">
+                              <div className="text-gray-700">{record.expiresAt}</div>
+                              <div className="text-[9px] text-gray-400">Starts: {record.startsAt}</div>
+                            </td>
+                            <td className="p-2.5 align-middle">
+                              <span className={`px-1.5 py-0.5 text-[8px] font-black uppercase inline-flex items-center border ${
+                                record.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-300' :
+                                record.status === 'suspended' ? 'bg-amber-50 text-amber-700 border-amber-300' :
+                                record.status === 'expired' ? 'bg-red-50 text-red-700 border-red-300' :
+                                'bg-stone-50 text-stone-700 border-stone-300'
+                              }`}>
+                                {record.status}
+                              </span>
+                            </td>
+                            <td className="p-2.5 align-middle text-right space-x-1">
+                              {record.status !== 'suspended' && record.status !== 'revoked' && (
+                                <button
+                                  onClick={() => {
+                                    updatePOSActivationStatus(record.licenseId, 'suspended');
+                                    setActivationRecords(getPOSActivationRecords());
+                                  }}
+                                  className="text-amber-600 hover:text-amber-800 font-bold uppercase text-[9px] hover:underline"
+                                  title="Suspend POS license state"
+                                >
+                                  Suspend
+                                </button>
+                              )}
+                              {record.status !== 'revoked' && (
+                                <button
+                                  onClick={() => {
+                                    updatePOSActivationStatus(record.licenseId, 'revoked');
+                                    setActivationRecords(getPOSActivationRecords());
+                                  }}
+                                  className="text-red-600 hover:text-red-800 font-bold uppercase text-[9px] hover:underline"
+                                  title="Revoke POS license authorization"
+                                >
+                                  Revoke
+                                </button>
+                              )}
+                              {record.status !== 'expired' && record.status !== 'revoked' && (
+                                <button
+                                  onClick={() => {
+                                    updatePOSActivationStatus(record.licenseId, 'expired');
+                                    setActivationRecords(getPOSActivationRecords());
+                                  }}
+                                  className="text-red-750 hover:text-red-900 font-bold uppercase text-[9px] hover:underline"
+                                  title="Mark POS license as expired"
+                                >
+                                  Expire
+                                </button>
+                              )}
+                              {record.status !== 'active' && (
+                                <button
+                                  onClick={() => {
+                                    updatePOSActivationStatus(record.licenseId, 'active');
+                                    setActivationRecords(getPOSActivationRecords());
+                                  }}
+                                  className="text-emerald-600 hover:text-emerald-800 font-bold uppercase text-[9px] hover:underline"
+                                  title="Reactivate POS license parameters"
+                                >
+                                  Reactivate
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Validation Panel: Column 3 */}
+            <div className="space-y-4">
+              <div className="bg-white border-2 border-[#1A1A1A] p-4 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold uppercase border-b border-[#D1D1CF] pb-2 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-[#FF5A00]" />
+                  Verify Vendor POS Access
+                </h3>
+
+                <div className="space-y-3 font-sans text-xs">
+                  <div className="space-y-1">
+                    <label className="text-gray-500 uppercase text-[9px] font-bold font-mono">Select Target Vendor</label>
+                    <select
+                      value={validateVendorId}
+                      onChange={(e) => setValidateVendorId(e.target.value)}
+                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] font-mono rounded-none uppercase"
+                    >
+                      <option value="">-- Choose Vendor to Check --</option>
+                      {vendors.map((v: Vendor) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name} ({v.id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={handleValidateAccess}
+                    className="w-full bg-[#1A1A1A] hover:bg-[#FF5A00] text-white py-2 uppercase font-bold text-center tracking-wide transition-colors font-mono cursor-pointer rounded-none text-[10px]"
+                  >
+                    Validate Vendor POS Access
+                  </button>
+                </div>
+
+                {/* Validation Results Display */}
+                {validationResult && (
+                  <div className="border border-[#D1D1CF] bg-gray-50 p-4 font-mono text-[10px] space-y-3">
+                    <div className="flex items-center justify-between border-b border-[#D1D1CF] pb-2">
+                      <span className="font-bold text-gray-500 uppercase">ACCESS COMPLIANCE STATUS:</span>
+                      <span className={`px-2 py-0.5 font-black uppercase text-[9px] inline-flex items-center border ${
+                        validationResult.allowed 
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300' 
+                          : 'bg-red-50 text-red-700 border-red-300'
+                      }`}>
+                        {validationResult.allowed ? 'ALLOWED' : 'BLOCKED'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-gray-400 uppercase text-[9px] block">REASON CODE</span>
+                        <span className="font-bold text-[#1A1A1A]">{validationResult.reasonCode}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 uppercase text-[9px] block">LICENSE BIND ID</span>
+                        <span className="font-bold text-[#1A1A1A]">{validationResult.license?.licenseId || 'N/A'}</span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-gray-400 uppercase text-[9px] block">COMPLIANCE DIAGNOSTICS MESSAGE</span>
+                        <span className="font-sans text-xs text-gray-700 leading-normal block mt-0.5">{validationResult.message}</span>
+                      </div>
+                      {validationResult.license && (
+                        <>
+                          <div>
+                            <span className="text-gray-400 uppercase text-[9px] block">LICENSE MODE</span>
+                            <span className="font-bold uppercase">{validationResult.license.licenseMode}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 uppercase text-[9px] block">STORAGE MODE</span>
+                            <span className="font-bold uppercase">{validationResult.license.storageMode}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 uppercase text-[9px] block">EXPIRATION DATE</span>
+                            <span className="font-bold">{validationResult.license.expiresAt}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
           </div>
         </div>
       )}
@@ -1809,6 +2179,211 @@ export default function POSLicensingView() {
 
           </div>
 
+        </div>
+      )}
+
+
+      {/* ==========================================================================
+         POS ACTIVATION BRIDGE DRAWER
+         ========================================================================== */}
+      {isActivationDrawerOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex justify-end z-50 font-mono text-xs">
+          <div className="absolute inset-0" onClick={() => setIsActivationDrawerOpen(false)} />
+          
+          <div className="bg-white border-l-4 border-[#1A1A1A] w-full max-w-md h-full relative z-10 flex flex-col justify-between shadow-2xl p-6 animate-slide-in overflow-y-auto">
+            <div>
+              <div className="flex justify-between items-center border-b border-[#D1D1CF] pb-4">
+                <div className="flex items-center space-x-2">
+                  <Terminal className="w-5 h-5 text-[#FF5A00]" />
+                  <h2 className="text-sm font-bold uppercase text-[#1A1A1A]">ISSUE POS ACTIVATION BRIDGE</h2>
+                </div>
+                <button 
+                  onClick={() => setIsActivationDrawerOpen(false)} 
+                  className="text-gray-400 hover:text-black border border-transparent hover:border-black p-1 transition-all cursor-pointer"
+                >
+                  <X className="w-4.5 h-4.5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleActivationSubmit} className="space-y-4 mt-6">
+                
+                {/* Vendor select */}
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Select Vendor Merchant</label>
+                  <select
+                    required
+                    value={actVendorId}
+                    onChange={(e) => setActVendorId(e.target.value)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
+                  >
+                    <option value="" disabled>-- Choose Registered Vendor --</option>
+                    {vendors.map((v: Vendor) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name} ({v.id}) [{v.status}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Plan select */}
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Billing Plan Slabs</label>
+                  <select
+                    required
+                    value={actPlanId}
+                    onChange={(e) => setActPlanId(e.target.value)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
+                  >
+                    <option value="" disabled>-- Choose Connected Plan --</option>
+                    {plans.map((p: Plan) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* License Mode Selector */}
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">License Mode</label>
+                  <select
+                    required
+                    value={actLicenseMode}
+                    onChange={(e) => setActLicenseMode(e.target.value as any)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase font-bold"
+                  >
+                    <option value="production">PRODUCTION / CLOUD</option>
+                    <option value="demo">DEMO / LOCAL ONLY</option>
+                  </select>
+                </div>
+
+                {/* Storage Mode Selector */}
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Storage Mode</label>
+                  <select
+                    required
+                    disabled
+                    value={actStorageMode}
+                    className="w-full bg-[#EAEAE8]/60 border border-[#D1D1CF] p-2.5 text-xs text-gray-500 rounded-none cursor-not-allowed uppercase font-semibold"
+                  >
+                    <option value="cloud">CLOUD INSTANCE</option>
+                    <option value="localOnly">LOCAL ONLY (STORAGE MODE DIRECTORY)</option>
+                  </select>
+                  <p className="text-[9px] text-gray-400">
+                    {actLicenseMode === 'demo' 
+                      ? '※ Demo licenses are strictly restricted to localOnly storage mode.' 
+                      : '※ Production licenses are strictly routed via cloud storage mode.'}
+                  </p>
+                </div>
+
+                {/* Start Date and Expiry Date */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Start Date</label>
+                    <input
+                      type="date"
+                      required
+                      value={actStartDate}
+                      onChange={(e) => setActStartDate(e.target.value)}
+                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none rounded-none font-semibold"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Expiry Date</label>
+                    <input
+                      type="date"
+                      required
+                      value={actExpiryDate}
+                      onChange={(e) => setActExpiryDate(e.target.value)}
+                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none rounded-none font-semibold"
+                    />
+                  </div>
+                </div>
+
+                {/* Custom Capacity Limits Grid */}
+                <div className="grid grid-cols-2 gap-3 bg-gray-50 p-3 border border-[#D1D1CF]">
+                  <div className="text-[9px] font-bold text-gray-700 uppercase col-span-2 border-b border-[#D1D1CF] pb-1">
+                    Dynamic Threshold Resource Allocations
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Branches</label>
+                    <input
+                      type="text"
+                      required
+                      value={actMaxBranches}
+                      onChange={(e) => setActMaxBranches(e.target.value)}
+                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Terminals</label>
+                    <input
+                      type="text"
+                      required
+                      value={actMaxTerminals}
+                      onChange={(e) => setActMaxTerminals(e.target.value)}
+                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Staff</label>
+                    <input
+                      type="text"
+                      required
+                      value={actMaxStaff}
+                      onChange={(e) => setActMaxStaff(e.target.value)}
+                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Products</label>
+                    <input
+                      type="text"
+                      required
+                      value={actMaxProducts}
+                      onChange={(e) => setActMaxProducts(e.target.value)}
+                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Provisioning Notes */}
+                <div className="space-y-1">
+                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Provisioning Notes</label>
+                  <textarea
+                    rows={2}
+                    value={actNotes}
+                    onChange={(e) => setActNotes(e.target.value)}
+                    placeholder="Describe specific TPM bonding requests..."
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs focus:outline-none focus:border-[#FF5A00]"
+                  />
+                </div>
+
+                <div className="bg-orange-50 border-l-4 border-[#FF5A00] p-3 text-[10px] text-orange-850 leading-relaxed font-sans">
+                  <strong>ACTIVATION BRIDGE REGISTRY:</strong> This registers a mock authorization record on the validation stack.
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-[#FF5A00] hover:bg-[#1A1A1A] text-white py-3 uppercase font-bold text-center tracking-wider transition-colors rounded-none cursor-pointer mt-2"
+                >
+                  Confirm and Authorize Activation
+                </button>
+              </form>
+            </div>
+
+            <button
+              onClick={() => setIsActivationDrawerOpen(false)}
+              className="w-full bg-white border border-[#D1D1CF] text-gray-700 py-2.5 uppercase font-bold text-center tracking-wide hover:bg-gray-100 transition-colors rounded-none cursor-pointer mt-4"
+            >
+              Cancel Operation
+            </button>
+          </div>
         </div>
       )}
 

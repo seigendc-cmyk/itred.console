@@ -22,6 +22,7 @@ import FinanceView from './components/FinanceView';
 import EcosystemDashboardView from './components/EcosystemDashboardView';
 import AIAnalystView from './components/AIAnalystView';
 import ErrorBoundary from './components/ErrorBoundary';
+import POSLicenseGuard from './guards/POSLicenseGuard';
 import {
   NotificationsView,
   AuditLogsView,
@@ -224,6 +225,17 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
   });
   const [systemConfig, setSystemConfig] = useState<SystemConfig>(INITIAL_SYSTEM_CONFIG);
   const [integrations, setIntegrations] = useState<IntegrationService[]>(INITIAL_INTEGRATIONS);
+
+  // Automatically toggle demo mode when demo vendor is active
+  React.useEffect(() => {
+    if (currentCompany === 'Alpha Demo Store') {
+      setIsDemoActive(true);
+      localStorage.setItem('sci_demo_mode', 'true');
+    } else {
+      setIsDemoActive(false);
+      localStorage.setItem('sci_demo_mode', 'false');
+    }
+  }, [currentCompany]);
 
   // Sync to local storage
   React.useEffect(() => {
@@ -978,10 +990,12 @@ function StaffRoute() {
   if (!isGoogleLoggedIn) return <Navigate to="/login" replace />;
   if (!currentCompany) return <Navigate to="/company-selector" replace />;
   return (
-    <StaffAccessView 
-      onSelectAdmin={setCurrentAdmin} 
-      selectedAdmin={currentAdmin} 
-    />
+    <POSLicenseGuard>
+      <StaffAccessView 
+        onSelectAdmin={setCurrentAdmin} 
+        selectedAdmin={currentAdmin} 
+      />
+    </POSLicenseGuard>
   );
 }
 
@@ -1078,7 +1092,9 @@ function RequireAuthLayout() {
         <main id="working_canvas_area" className="flex-1 overflow-y-auto p-8 relative">
           {/* Main active subview container */}
           <div className="max-w-7xl mx-auto space-y-6 pb-20">
-            <Outlet />
+            <POSLicenseGuard>
+              <Outlet />
+            </POSLicenseGuard>
           </div>
         </main>
 
