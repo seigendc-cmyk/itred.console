@@ -4,4 +4,5 @@ export * from "./firebaseConfig";
 export * from "./firebaseConnectionState";
 export * from "./firebaseClient";
 export * from "./auth";
+export * from "./repositories";
 
