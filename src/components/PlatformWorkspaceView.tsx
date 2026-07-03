@@ -811,6 +811,21 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
               >
                 Save Settings Configuration
               </button>
+
+              <div className="pt-4 border-t border-[#D1D1CF]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm("WARNING: This will clear all localStorage database state and reset the prototype data to initial defaults. Continue?")) {
+                      localStorage.clear();
+                      window.location.reload();
+                    }
+                  }}
+                  className="w-full py-2 bg-red-650 hover:bg-red-800 text-white text-[10px] tracking-wider uppercase font-black cursor-pointer transition-all rounded-none"
+                >
+                  RESET PROTOTYPE DATA
+                </button>
+              </div>
             </form>
           </div>
 
