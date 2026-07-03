@@ -108,6 +108,12 @@ export interface FinanceRecord {
   date: string;
   refNo: string;
   accountId?: string;
+  vendorName?: string;
+  currency?: string;
+  recordType?: 'Subscription' | 'Renewal' | 'Capacity Add-on' | 'Business Module' | 'Demo Conversion' | 'Commission' | 'Adjustment';
+  paymentStatus?: 'Pending' | 'Paid' | 'Overdue' | 'Cancelled' | 'Refunded';
+  linkedPlanId?: string;
+  linkedLicenseId?: string;
 }
 
 export interface BankAccount {
