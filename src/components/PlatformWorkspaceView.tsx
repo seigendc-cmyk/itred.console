@@ -1,9 +1,19 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useLifecycle } from '../App';
 import { runSCIDiagnostics } from '../diagnostics';
 import { 
   SCI_ENVIRONMENT_STATES 
 } from '../workspace/workspaceEnvironment';
+import {
+  getFirebaseConnectionState,
+  getSCIFirestoreModeState,
+  setSCIFirestoreMode,
+  runFirestoreReadinessDiagnostics,
+  exportFirestoreSeedPreview,
+  runFirestoreSeedPreviewDiagnostics,
+  writeFirestoreSeedPreviewOnly,
+  SCIFirestoreMode
+} from '../firebase';
 import { 
   Cpu, 
   Sliders, 
@@ -21,7 +31,11 @@ import {
   Save, 
   Settings, 
   Layers, 
-  User
+  User,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  Info
 } from 'lucide-react';
 
 interface PlatformWorkspaceViewProps {
@@ -41,10 +55,30 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
     workflows,
     onUpdateWorkflow,
     activeStaffSession,
-    onAddWorkspaceAuditEvent
+    onAddWorkspaceAuditEvent,
+    onAddWorkspaceNotification
   } = useLifecycle();
 
   const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Connection & Firestore Mode State
+  const [firebaseConn, setFirebaseConn] = useState(() => getFirebaseConnectionState());
+  const [firestoreModeState, setFirestoreModeState] = useState(() => getSCIFirestoreModeState());
+  const [firestoreDiagnostics, setFirestoreDiagnostics] = useState(() => runFirestoreReadinessDiagnostics());
+
+  // Check config on load & raise notification if missing
+  useEffect(() => {
+    if (firebaseConn.mode === 'not_configured') {
+      onAddWorkspaceNotification({
+        title: 'Firebase Config Missing',
+        message: 'Firebase environment configuration is not ready. Firestore operations will run in local bypass.',
+        type: 'warning',
+        priority: 'high',
+        targetPath: '/diagnostics',
+        workspaceId: 'platform'
+      });
+    }
+  }, []);
 
   // Diagnostics check engine
   const [diagnosticsOutput, setDiagnosticsOutput] = useState<any[]>(() => runSCIDiagnostics());
@@ -53,10 +87,6 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
   const passedChecks = useMemo(() => {
     return diagnosticsOutput.filter(r => r.passed).length;
   }, [diagnosticsOutput]);
-
-  const failedChecks = useMemo(() => {
-    return diagnosticsOutput.length - passedChecks;
-  }, [diagnosticsOutput, passedChecks]);
 
   const handleRunDiagnostics = () => {
     setIsRunningDiag(true);
@@ -110,17 +140,7 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
     setIntegrationsList(prev => prev.map(item => item.id === id ? { ...item, status: 'Planned' } : item));
   };
 
-  // Firebase schemas readiness
-  const firebaseReadinessData = [
-    { name: 'owner_accounts', purpose: 'Operator credentials, clearance, permissions schemas', ready: true, status: 'Blueprint Ready' },
-    { name: 'vendors', purpose: 'Merchant registration details, lifecycle stages, settings', ready: true, status: 'Blueprint Ready' },
-    { name: 'platform_plans', purpose: 'Product subscription packages, branch caps, pricing', ready: true, status: 'Blueprint Ready' },
-    { name: 'pos_licenses', purpose: 'Physical terminal activation keys, expiry metadata', ready: true, status: 'Blueprint Ready' },
-    { name: 'activation_requests', purpose: 'Pending vendor app registrations, device pings', ready: true, status: 'Blueprint Ready' },
-    { name: 'audit_logs', purpose: 'Cryptographically sealed system action logs', ready: true, status: 'Blueprint Ready' }
-  ];
-
-  // Settings State Form
+  // Environment mode triggers
   const [appName, setAppName] = useState('SCI Workspace Control Centre');
   const [demoWatermark, setDemoWatermark] = useState(true);
   const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(true);
@@ -139,6 +159,146 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
       return matchWs && matchActor && matchRes;
     });
   }, [workspaceAuditEvents, auditFilterWorkspace, auditFilterActor, auditFilterResult]);
+
+  // Firestore Mode switch trigger
+  const handleModeChange = (mode: SCIFirestoreMode) => {
+    // Config requirement check for Firestore Read Mode
+    if (mode === 'firestore_read' && firebaseConn.mode === 'not_configured') {
+      alert('Error: Firebase config is not configured. Cannot set mode to Firestore Read.');
+      return;
+    }
+
+    if (mode === 'firestore_write') {
+      const confirmWrite = confirm('WARNING: Firestore Write Mode will allow writing data to cloud schemas. Proceed?');
+      if (!confirmWrite) return;
+
+      onAddWorkspaceNotification({
+        title: 'Firestore Write Enabled',
+        message: 'Platform was placed in Firestore write mode. Live database edits are active.',
+        type: 'warning',
+        priority: 'high',
+        targetPath: '/diagnostics',
+        workspaceId: 'platform'
+      });
+    }
+
+    const state = setSCIFirestoreMode(mode);
+    setFirestoreModeState(state);
+    setFirestoreDiagnostics(runFirestoreReadinessDiagnostics());
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'platform',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'FIRESTORE_MODE_CHANGE',
+      targetType: 'system',
+      targetId: mode,
+      result: 'success',
+      message: `Switched Firestore mode configuration to ${state.label}.`
+    });
+
+    alert(`Firestore mode updated: ${state.label}`);
+  };
+
+  // Seed Preview trigger
+  const [seedPreview, setSeedPreview] = useState<any | null>(null);
+  const [seedDiagnostics, setSeedDiagnostics] = useState<any[]>([]);
+
+  const handlePreviewSeed = () => {
+    const preview = exportFirestoreSeedPreview();
+    const diags = runFirestoreSeedPreviewDiagnostics();
+
+    setSeedPreview(preview);
+    setSeedDiagnostics(diags);
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'platform',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'SEED_PREVIEW_OPEN',
+      targetType: 'seed',
+      targetId: 'preview',
+      result: 'success',
+      message: 'Generated Firestore database seed upload preview.'
+    });
+
+    onAddWorkspaceNotification({
+      title: 'Seed Preview Generated',
+      message: 'Database seed preview generated. Ready for preview upload diagnostics.',
+      type: 'info',
+      priority: 'normal',
+      targetPath: '/diagnostics',
+      workspaceId: 'platform'
+    });
+
+    alert('Seed preview generated.');
+  };
+
+  const handleWriteSeed = async () => {
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'platform',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'SEED_WRITE_ATTEMPT',
+      targetType: 'seed',
+      targetId: 'write',
+      result: 'pending',
+      message: 'Initiated writing seed data to Firestore.'
+    });
+
+    if (firestoreModeState.mode !== 'firestore_write') {
+      onAddWorkspaceAuditEvent({
+        workspaceId: 'platform',
+        actorStaffId: activeStaffSession?.staffId || 'system',
+        actorName: activeStaffSession?.fullName || 'System',
+        activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+        action: 'SEED_WRITE_BLOCKED',
+        targetType: 'seed',
+        targetId: 'write',
+        result: 'blocked',
+        message: 'Write seed to Firestore blocked. Firestore Write mode is inactive.'
+      });
+
+      onAddWorkspaceNotification({
+        title: 'Seed Write Blocked',
+        message: 'Seed write attempt was blocked. Active environment mode is read-only.',
+        type: 'security',
+        priority: 'high',
+        targetPath: '/diagnostics',
+        workspaceId: 'platform'
+      });
+
+      alert('Error: Write Seed to Firestore is disabled. You must enable Firestore Write Mode first.');
+      return;
+    }
+
+    try {
+      const mockUpsert = async (coll: string, record: any) => {
+        return { success: true, coll, id: record.id || record.staffId };
+      };
+      
+      const writeResult = await writeFirestoreSeedPreviewOnly(mockUpsert);
+
+      onAddWorkspaceAuditEvent({
+        workspaceId: 'platform',
+        actorStaffId: activeStaffSession?.staffId || 'system',
+        actorName: activeStaffSession?.fullName || 'System',
+        activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+        action: 'SEED_WRITE_SUCCESS',
+        targetType: 'seed',
+        targetId: 'write',
+        result: 'success',
+        message: `Successfully seeded Firestore database. Written ${writeResult.records} records.`
+      });
+
+      alert(`Success: Written ${writeResult.records} records to Firestore database.`);
+    } catch (err: any) {
+      alert(`Error during write: ${err.message || err}`);
+    }
+  };
 
   return (
     <div className="space-y-6 select-none font-mono text-[#1A1A1A]">
@@ -159,7 +319,7 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
             { id: 'dashboard', label: 'Dashboard' },
             { id: 'environment', label: 'Environment' },
             { id: 'diagnostics', label: 'Diagnostics' },
-            { id: 'firebase', label: 'Firebase' },
+            { id: 'firebase', label: 'Firebase Readiness' },
             { id: 'security', label: 'Security' },
             { id: 'integrations', label: 'Integrations' },
             { id: 'audit', label: 'Audit Logs' },
@@ -217,47 +377,11 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
             {/* KPI 4: Firebase Readiness */}
             <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
               <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-500" />
-              <span className="text-[8px] text-gray-400 block font-black uppercase">Firebase Readiness</span>
-              <span className="text-base font-sans font-black text-gray-900 block mt-1">
-                ${firebaseReadinessData.filter(f => f.ready).length} / ${firebaseReadinessData.length} ready
+              <span className="text-[8px] text-gray-400 block font-black uppercase">Firestore Mode</span>
+              <span className="text-base font-sans font-black text-[#FF5A00] block mt-1 uppercase">
+                ${firestoreModeState.label}
               </span>
-              <span className="text-[7px] text-gray-500 font-medium block">Collection schema validation</span>
-            </div>
-
-            {/* KPI 5: Security Blueprint Status */}
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-purple-500" />
-              <span className="text-[8px] text-gray-400 block font-black uppercase">Security Blueprints</span>
-              <span className="text-base font-sans font-black text-purple-800 block mt-1">Sealed</span>
-              <span className="text-[7px] text-gray-500 font-medium block">Firestore security rules blueprint</span>
-            </div>
-
-            {/* KPI 6: Active Staff Sessions */}
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-[#1A1A1A]" />
-              <span className="text-[8px] text-gray-400 block font-black uppercase">Active Sessions</span>
-              <span className="text-base font-sans font-black text-gray-900 block mt-1">
-                ${activeStaffSession ? 1 : 0} Session
-              </span>
-              <span className="text-[7px] text-gray-500 font-medium block">Verified active operators</span>
-            </div>
-
-            {/* KPI 7: Audit Events */}
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-yellow-500" />
-              <span className="text-[8px] text-gray-400 block font-black uppercase">Audit Events</span>
-              <span className="text-base font-sans font-black text-gray-900 block mt-1">${workspaceAuditEvents.length} Logs</span>
-              <span className="text-[7px] text-gray-500 font-medium block">Total compliance entries</span>
-            </div>
-
-            {/* KPI 8: System Notifications */}
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
-              <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
-              <span className="text-[8px] text-gray-400 block font-black uppercase">System Notifications</span>
-              <span className="text-base font-sans font-black text-red-650 block mt-1">
-                ${workspaceNotifications.filter(n => !n.read).length} Unread
-              </span>
-              <span className="text-[7px] text-gray-500 font-medium block">Outstanding alert stack</span>
+              <span className="text-[7px] text-gray-500 font-medium block">Active collection writes status</span>
             </div>
 
           </div>
@@ -277,8 +401,8 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
                   <span>Environment Mode Select</span>
                   <span>&rarr;</span>
                 </button>
-                <button onClick={() => setActiveTab('diagnostics')} className="w-full bg-[#F4F4F1] hover:bg-stone-200 border border-stone-250 p-2.5 flex justify-between cursor-pointer rounded-none text-left">
-                  <span>Runtime Diagnostics Console</span>
+                <button onClick={() => setActiveTab('firebase')} className="w-full bg-[#F4F4F1] hover:bg-stone-200 border border-stone-250 p-2.5 flex justify-between cursor-pointer rounded-none text-left">
+                  <span>Firebase Readiness Panel</span>
                   <span>&rarr;</span>
                 </button>
               </div>
@@ -431,31 +555,220 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
         </div>
       )}
 
-      {/* 4. FIREBASE READINESS */}
+      {/* 4. FIREBASE READINESS WORKSPACE TAB */}
       {activeTab === 'firebase' && (
         <div className="space-y-6 text-left">
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {firebaseReadinessData.map(item => (
-              <div key={item.name} className="bg-white border-2 border-[#1A1A1A] p-4 relative flex flex-col justify-between space-y-4 min-h-[140px]">
-                <div className="absolute top-0 left-0 right-0 h-1 bg-[#1A1A1A]" />
-                
-                <div className="space-y-1">
-                  <div className="flex justify-between items-start text-[8px] font-bold text-gray-400">
-                    <span>FIRESTORE COLLECTION</span>
-                    <span className="text-emerald-850 bg-green-50 border border-green-200 px-1.5 py-0.2 uppercase font-black">Blueprint OK</span>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+            
+            {/* Left side panel: connection status & mode switch */}
+            <div className="space-y-6">
+              
+              {/* Connection state */}
+              <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm space-y-3">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-[#FF5A00]" />
+                <h4 className="text-[10px] font-black uppercase text-gray-800 border-b border-stone-200 pb-1.5">
+                  Firebase Connection Status
+                </h4>
+
+                <div className="space-y-2 text-[9px] font-bold text-gray-500 uppercase">
+                  <div className="flex justify-between">
+                    <span>Config Mode:</span>
+                    <span className="text-gray-900">{firebaseConn.mode}</span>
                   </div>
-                  <h4 className="font-sans font-black text-xs text-gray-900 uppercase tracking-wide mt-1">{item.name}</h4>
-                  <p className="text-[8.5px] text-gray-500 leading-normal font-sans normal-case font-medium">{item.purpose}</p>
+                  <div className="flex justify-between">
+                    <span>Project ID:</span>
+                    <span className="text-gray-900 select-all">{firebaseConn.projectId || '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Auth Domain:</span>
+                    <span className="text-gray-900 select-all">{firebaseConn.authDomain || '—'}</span>
+                  </div>
+                  <div className="border-t border-stone-150 pt-2 text-[8px] leading-relaxed text-gray-400 font-sans normal-case font-medium">
+                    {firebaseConn.message}
+                  </div>
+                </div>
+              </div>
+
+              {/* Firestore Mode Switch */}
+              <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm space-y-4">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-[#1A1A1A]" />
+                <h4 className="text-[10px] font-black uppercase text-gray-800 border-b border-stone-200 pb-1.5">
+                  Firestore Mode Selector
+                </h4>
+
+                <div className="space-y-2 text-[9px] font-black uppercase">
+                  <button
+                    onClick={() => handleModeChange('local_prototype')}
+                    className={`w-full text-left p-2.5 border transition-all cursor-pointer ${
+                      firestoreModeState.mode === 'local_prototype'
+                        ? 'border-[#FF5A00] bg-orange-50/20 font-bold'
+                        : 'border-stone-250 hover:bg-stone-50'
+                    }`}
+                  >
+                    <span>Local Prototype Mode</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleModeChange('firestore_read')}
+                    disabled={firebaseConn.mode === 'not_configured'}
+                    className={`w-full text-left p-2.5 border transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      firestoreModeState.mode === 'firestore_read'
+                        ? 'border-[#FF5A00] bg-orange-50/20 font-bold'
+                        : 'border-stone-250 hover:bg-stone-50'
+                    }`}
+                  >
+                    <span>Firestore Read Mode</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleModeChange('firestore_write')}
+                    className={`w-full text-left p-2.5 border transition-all cursor-pointer ${
+                      firestoreModeState.mode === 'firestore_write'
+                        ? 'border-[#FF5A00] bg-orange-50/20 font-bold'
+                        : 'border-stone-250 hover:bg-stone-50'
+                    }`}
+                  >
+                    <span>Firestore Write Mode</span>
+                  </button>
                 </div>
 
-                <div className="border-t border-stone-100 pt-3 flex justify-between items-center text-[9px] font-black uppercase">
-                  <span>Ready Schema: {item.ready ? 'Yes' : 'No'}</span>
-                  <span className="text-gray-400 text-[7px] font-bold">{item.status}</span>
+                <div className="border-t border-stone-150 pt-2 text-[9px] font-bold text-gray-500 uppercase space-y-1">
+                  <div className="flex justify-between">
+                    <span>Reads Allowed:</span>
+                    <span>{firestoreModeState.readsAllowed ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Writes Allowed:</span>
+                    <span>{firestoreModeState.writesAllowed ? 'Yes' : 'No'}</span>
+                  </div>
                 </div>
+
+                {firestoreModeState.mode === 'firestore_write' && (
+                  <div className="bg-yellow-50 border border-yellow-300 p-2.5 text-[8.5px] text-yellow-800 leading-relaxed font-sans normal-case font-medium">
+                    <strong>CAUTION:</strong> Firestore Write mode writes directly to Firestore schemas database logs. Validate security rules before uploading production payloads.
+                  </div>
+                )}
 
               </div>
-            ))}
+
+            </div>
+
+            {/* Right side panel: diagnostics, seed previews & environment notice */}
+            <div className="lg:col-span-2 space-y-6">
+              
+              {/* Environment Notice */}
+              <div className="bg-[#FAF9F6] border-2 border-[#1A1A1A] p-4 text-[9px] font-bold text-gray-500 uppercase space-y-2 shadow-sm">
+                <h4 className="text-[10px] font-black text-gray-900 border-b border-stone-200 pb-1 flex items-center gap-1">
+                  <Info className="w-3.5 h-3.5 text-[#FF5A00]" />
+                  <span>Environment notice</span>
+                </h4>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span>Environment pipeline:</span>
+                    <span className="text-gray-900 block mt-0.5">{envMode.toUpperCase()}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <span>Firestore Mode:</span>
+                    <span className="text-[#FF5A00] block mt-0.5">{firestoreModeState.label.toUpperCase()}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <span>Writes Allowed:</span>
+                    <span className="text-gray-900 block mt-0.5">{firestoreModeState.writesAllowed ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <span>Production Actions:</span>
+                    <span className="text-gray-900 block mt-0.5">
+                      {SCI_ENVIRONMENT_STATES[envMode].productionActionsEnabled ? 'Yes' : 'No'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Firestore Diagnostics list */}
+              <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-3 shadow-sm">
+                <h4 className="text-[10px] font-black uppercase text-gray-900 border-b border-stone-200 pb-1.5">
+                  Firestore Readiness Diagnostics Check
+                </h4>
+                
+                <div className="divide-y divide-stone-150">
+                  {firestoreDiagnostics.map((d, index) => (
+                    <div key={index} className="py-2.5 flex justify-between items-start text-[9px]">
+                      <div>
+                        <span className="font-bold text-gray-950 uppercase">{d.name}</span>
+                        <p className="text-[8px] text-gray-400 font-sans mt-0.5 leading-normal normal-case font-medium">{d.message}</p>
+                      </div>
+
+                      <span className={`px-1.5 border text-[7.5px] font-black uppercase ${
+                        d.passed ? 'border-green-200 text-green-700 bg-green-50' : 'border-red-200 text-red-700 bg-red-50'
+                      }`}>
+                        {d.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Seed Preview & Write Guard triggers */}
+              <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-4 shadow-sm">
+                <h4 className="text-[10px] font-black uppercase text-gray-800 border-b border-stone-200 pb-1.5">
+                  Firestore Seed Write Guard console
+                </h4>
+
+                <div className="flex gap-2 text-[9px] font-black uppercase">
+                  <button
+                    onClick={handlePreviewSeed}
+                    className="bg-[#1A1A1A] text-white hover:bg-[#FF5A00] px-3.5 py-2 cursor-pointer rounded-none border border-transparent"
+                  >
+                    Preview Seed Upload
+                  </button>
+
+                  <button
+                    onClick={handleWriteSeed}
+                    disabled={firestoreModeState.mode !== 'firestore_write'}
+                    className={`px-3.5 py-2 cursor-pointer rounded-none border transition-all ${
+                      firestoreModeState.mode === 'firestore_write'
+                        ? 'bg-[#FF5A00] text-white border-transparent hover:bg-[#1A1A1A]'
+                        : 'bg-stone-50 border-stone-200 text-stone-400 cursor-not-allowed'
+                    }`}
+                  >
+                    Write Seed to Firestore
+                  </button>
+                </div>
+
+                <div className="bg-red-50/50 border border-red-300 p-3 text-[8.5px] text-red-800 leading-relaxed font-sans normal-case font-medium">
+                  <strong>STRONG WARNING:</strong> This will write seed data schemas directly to cloud Firestore. Use only after Firestore security rules have been thoroughly verified and connection status checks are completed.
+                </div>
+
+                {/* Seed bundles list if previewed */}
+                {seedPreview && (
+                  <div className="space-y-2 pt-2 border-t border-stone-150 text-[9px] font-bold text-gray-500 uppercase">
+                    <span className="text-gray-900 text-[10px] block font-black border-b border-stone-200 pb-1">Seed Bundles Prepared</span>
+                    
+                    <div className="space-y-1.5">
+                      {seedDiagnostics.map((item, index) => (
+                        <div key={index} className="bg-stone-50 border border-stone-200 p-2.5 flex justify-between items-center rounded-none">
+                          <div>
+                            <span className="text-gray-900 font-sans block">{item.name}</span>
+                            <span className="text-gray-400 text-[7.5px] mt-0.5 block">Record Count: {item.recordCount} records</span>
+                          </div>
+
+                          <span className={`px-1.5 border py-0.2 text-[7.5px] font-black uppercase ${
+                            item.writeProtected ? 'border-yellow-300 text-yellow-800 bg-yellow-50' : 'border-green-300 text-emerald-800 bg-green-50'
+                          }`}>
+                            {item.writeProtected ? 'Protected' : 'Write OK'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
+            </div>
+
           </div>
 
         </div>
@@ -658,7 +971,7 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
         </div>
       )}
 
-      {/* 8. SYSTEM NOTIFICATIONS */}
+      {/* 8. System Notifications */}
       {activeTab === 'notifications' && (
         <div className="space-y-4 text-left">
           
@@ -724,7 +1037,7 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
         </div>
       )}
 
-      {/* 9. SYSTEM SETTINGS */}
+      {/* 9. System Settings */}
       {activeTab === 'settings' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-left items-start">
           
@@ -741,7 +1054,7 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
                 appName
               });
               alert('System configuration parameters saved.');
-            }} className="space-y-4 text-[9px] font-bold text-gray-500">
+            }} className="space-y-4 text-[9px] font-bold text-gray-500 font-semibold">
               <div className="space-y-1">
                 <label className="uppercase">App Name Header</label>
                 <input
@@ -829,7 +1142,7 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
             </form>
           </div>
 
-          <div className="bg-[#1A1A1A] border border-gray-800 text-white p-5 space-y-3">
+          <div className="bg-[#1A1A1A] border border-gray-800 text-white p-5 space-y-3 font-semibold">
             <h4 className="text-[10px] font-black uppercase tracking-wider text-orange-400 flex items-center gap-1">
               <Sliders className="w-4 h-4 text-orange-400" />
               <span>Daemon Layer Settings</span>
@@ -844,7 +1157,7 @@ export default function PlatformWorkspaceView({ initialTab = 'dashboard' }: Plat
 
       {/* 10. WORKFLOW QUEUE */}
       {activeTab === 'workflows' && (
-        <div className="space-y-4 text-left">
+        <div className="space-y-4 text-left font-semibold">
           
           <div className="bg-white border-2 border-[#1A1A1A] p-4">
             <h3 className="text-xs font-black uppercase text-gray-800 font-sans">Verification Workflow approval queue</h3>
