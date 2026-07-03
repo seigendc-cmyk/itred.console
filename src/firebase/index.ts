@@ -8,4 +8,5 @@ export * from "./repositories";
 export * from "./diagnostics";
 export * from "./mode";
 export * from "./gateway";
+export * from "./seed";
 
