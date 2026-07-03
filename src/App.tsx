@@ -29,7 +29,6 @@ import StaffRoleCreatorView from './components/internal/StaffRoleCreatorView';
 import StaffDeskCreatorView from './components/internal/StaffDeskCreatorView';
 import CapacityView from './components/internal/CapacityView';
 import ErrorBoundary from './components/ErrorBoundary';
-import POSLicenseGuard from './guards/POSLicenseGuard';
 import {
   NotificationsView,
   AuditLogsView,
@@ -1567,9 +1566,7 @@ function RequireAuthLayout() {
         <main id="working_canvas_area" className="flex-1 overflow-y-auto p-6 relative">
           <div className="max-w-7xl mx-auto space-y-6 pb-20">
             {currentWorkspaceAccess.allowed ? (
-              <POSLicenseGuard>
-                <Outlet />
-              </POSLicenseGuard>
+              <Outlet />
             ) : (
               <div id="access_restricted_panel" className="bg-white border-4 border-[#1A1A1A] p-10 max-w-2xl mx-auto text-left space-y-6 shadow-2xl relative mt-12 font-mono text-[#1A1A1A]">
                 <div className="absolute top-0 left-0 right-0 h-2 bg-[#FF5A00]" />
