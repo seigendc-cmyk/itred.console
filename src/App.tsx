@@ -97,8 +97,28 @@ import {
   SCI_WORKSPACES,
   resolveWorkspaceAccess,
   switchStaffDesk,
-  buildAccessRestrictedViewModel
+  buildAccessRestrictedViewModel,
+  SCIEnvironmentMode,
+  getSCIEnvironmentMode,
+  setSCIEnvironmentMode,
+  getSCIEnvironmentState,
+  getWorkspaceNotifications,
+  markWorkspaceNotificationRead,
+  SCIWorkspaceNotification,
+  getWorkspaceAuditEvents,
+  addWorkspaceAuditEvent,
+  SCIWorkspaceAuditEvent,
+  getWorkspaceActivities,
+  SCIWorkspaceActivity,
+  SCIWorkspaceSearchItem,
+  clearWorkspaceAuditEvents
 } from './workspace';
+import {
+  getWorkflows,
+  addWorkflow,
+  updateWorkflow,
+  SCIWorkflow
+} from './workflow';
 import WorkspaceRail from './components/WorkspaceRail';
 
 import {
@@ -357,6 +377,99 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     localStorage.setItem('sgn_google_email', googleEmail);
   }, [googleEmail]);
+
+  // ==========================================================================
+  // SCI WORKSPACE STATE INTEGRATIONS
+  // ==========================================================================
+  const [envMode, setEnvMode] = useState<SCIEnvironmentMode>(() => {
+    return getSCIEnvironmentMode();
+  });
+
+  const [workspaceNotifications, setWorkspaceNotifications] = useState<SCIWorkspaceNotification[]>(() => {
+    return getWorkspaceNotifications();
+  });
+
+  const [workspaceAuditEvents, setWorkspaceAuditEvents] = useState<SCIWorkspaceAuditEvent[]>(() => {
+    return getWorkspaceAuditEvents();
+  });
+
+  const [workspaceActivities, setWorkspaceActivities] = useState<SCIWorkspaceActivity[]>(() => {
+    return getWorkspaceActivities();
+  });
+
+  const [workflows, setWorkflows] = useState<SCIWorkflow[]>(() => {
+    const existing = getWorkflows();
+    if (existing.length === 0) {
+      const seed: Omit<SCIWorkflow, "workflowId" | "createdAt" | "updatedAt">[] = [
+        {
+          workflowType: "vendor_activation",
+          title: "SparkCorp Onboarding",
+          description: "Compliance document verification & gateway setup.",
+          status: "pending",
+          requesterId: "staff_01",
+          requesterName: "Sarah Jenkins",
+          currentStep: 2,
+          totalSteps: 5
+        },
+        {
+          workflowType: "pos_license",
+          title: "POS Terminal Key Generation",
+          description: "Cryptographic keys for Alpha Demo Store terminal.",
+          status: "submitted",
+          requesterId: "staff_02",
+          requesterName: "Marcus Vance",
+          currentStep: 1,
+          totalSteps: 3
+        }
+      ];
+      seed.forEach(w => addWorkflow(w));
+      return getWorkflows();
+    }
+    return existing;
+  });
+
+  const handleSetEnvMode = (mode: SCIEnvironmentMode) => {
+    setSCIEnvironmentMode(mode);
+    setEnvMode(mode);
+    // Also record environment change audit event
+    addWorkspaceAuditEvent({
+      workspaceId: 'platform',
+      actorStaffId: activeStaffSession?.staffId,
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId,
+      action: 'ENVIRONMENT_MODE_CHANGE',
+      targetType: 'environment',
+      targetId: mode,
+      result: 'success',
+      message: `Environment mode switched to ${mode}.`
+    });
+    setWorkspaceAuditEvents(getWorkspaceAuditEvents());
+  };
+
+  const handleMarkWorkspaceNotificationRead = (id: string) => {
+    markWorkspaceNotificationRead(id);
+    setWorkspaceNotifications(getWorkspaceNotifications());
+  };
+
+  const handleAddWorkspaceAuditEvent = (event: Omit<SCIWorkspaceAuditEvent, "auditId" | "createdAt">) => {
+    addWorkspaceAuditEvent(event);
+    setWorkspaceAuditEvents(getWorkspaceAuditEvents());
+  };
+
+  const handleClearWorkspaceAuditEvents = () => {
+    clearWorkspaceAuditEvents();
+    setWorkspaceAuditEvents([]);
+  };
+
+  const handleAddWorkflow = (w: Omit<SCIWorkflow, "workflowId" | "createdAt" | "updatedAt">) => {
+    addWorkflow(w);
+    setWorkflows(getWorkflows());
+  };
+
+  const handleUpdateWorkflow = (id: string, updates: Partial<SCIWorkflow>) => {
+    updateWorkflow(id, updates);
+    setWorkflows(getWorkflows());
+  };
 
   // Subview specific state
   const [selectedAuditActor, setSelectedAuditActor] = useState<string>('all');
@@ -1050,7 +1163,21 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     demoVendor,
     startVendorDemo,
     resetDemoData,
-    convertDemoToPaidPlan
+    convertDemoToPaidPlan,
+
+    // SCI Workspace integrations
+    envMode,
+    onChangeEnvMode: handleSetEnvMode,
+    workspaceNotifications,
+    onMarkWorkspaceNotificationRead: handleMarkWorkspaceNotificationRead,
+    workspaceAuditEvents,
+    onAddWorkspaceAuditEvent: handleAddWorkspaceAuditEvent,
+    onClearWorkspaceAuditEvents: handleClearWorkspaceAuditEvents,
+    workspaceActivities,
+    setWorkspaceActivities,
+    workflows,
+    onAddWorkflow: handleAddWorkflow,
+    onUpdateWorkflow: handleUpdateWorkflow
   };
 
   return (
@@ -1098,6 +1225,16 @@ function StaffRoute() {
   const handleLoginSuccess = (session: SCIStaffSession) => {
     setActiveStaffSession(session);
     localStorage.setItem('sci_staff_session', JSON.stringify(session));
+    addWorkspaceAuditEvent({
+      workspaceId: 'home',
+      actorStaffId: session.staffId,
+      actorName: session.fullName,
+      activeDeskId: session.activeDeskId,
+      action: 'STAFF_LOGIN',
+      targetType: 'session',
+      result: 'success',
+      message: `Staff member ${session.fullName} logged into desk ${session.activeDeskId}.`
+    });
   };
 
   return (
@@ -1124,12 +1261,20 @@ function RequireAuthLayout() {
     searchQuery,
     setSearchQuery,
     vendors,
-    isDemoActive,
     activeStaffSession,
     setActiveStaffSession,
     internalStaff,
     staffRoles,
-    staffDesks
+    staffDesks,
+
+    // SCI Workspace states and modifiers
+    envMode,
+    onChangeEnvMode,
+    workspaceNotifications,
+    onMarkWorkspaceNotificationRead,
+    onAddWorkspaceAuditEvent,
+    workspaceActivities,
+    workflows
   } = useLifecycle();
 
   const location = useLocation();
@@ -1195,6 +1340,23 @@ function RequireAuthLayout() {
     });
   }, [currentWorkspaceAccess, activeWorkspace, activeStaffSession]);
 
+  // Effect to log audit events on restricted access attempts
+  React.useEffect(() => {
+    if (!currentWorkspaceAccess.allowed && activeStaffSession && activeWorkspace) {
+      onAddWorkspaceAuditEvent({
+        workspaceId: activeWorkspace.workspaceId,
+        actorStaffId: activeStaffSession.staffId,
+        actorName: activeStaffSession.fullName,
+        activeDeskId: activeStaffSession.activeDeskId,
+        action: 'RESTRICTED_ACCESS_ATTEMPT',
+        targetType: 'workspace',
+        targetId: activeWorkspace.workspaceId,
+        result: 'blocked',
+        message: `Attempted access to blocked workspace: ${activeWorkspace.label}. Reason: ${currentWorkspaceAccess.message}`
+      });
+    }
+  }, [currentWorkspaceAccess.allowed, activeWorkspaceId, activeStaffSession?.activeDeskId]);
+
   const handleDeskSwitch = (deskId: string) => {
     if (!activeStaffSession) return;
     const staff = internalStaff.find(s => s.staffId === activeStaffSession.staffId);
@@ -1210,21 +1372,79 @@ function RequireAuthLayout() {
 
     if (decision.allowed && decision.session) {
       setActiveStaffSession(decision.session);
+      onAddWorkspaceAuditEvent({
+        workspaceId: activeWorkspaceId,
+        actorStaffId: activeStaffSession.staffId,
+        actorName: activeStaffSession.fullName,
+        activeDeskId: deskId,
+        action: 'DESK_SWITCH',
+        targetType: 'desk',
+        targetId: deskId,
+        result: 'success',
+        message: `Switched active desk console to "${desk.deskName}".`
+      });
       alert(`Success: Switched active desk console to "${desk.deskName}".`);
     } else {
+      onAddWorkspaceAuditEvent({
+        workspaceId: activeWorkspaceId,
+        actorStaffId: activeStaffSession.staffId,
+        actorName: activeStaffSession.fullName,
+        activeDeskId: activeStaffSession.activeDeskId,
+        action: 'DESK_SWITCH',
+        targetType: 'desk',
+        targetId: deskId,
+        result: 'blocked',
+        message: `Blocked desk switch to "${desk.deskName}": ${decision.message}`
+      });
       alert(`Access Blocked: ${decision.message}`);
     }
   };
+
+  // Environment state configurations
+  const environmentState = getSCIEnvironmentState();
+  const showDemoWatermark = environmentState.demoWatermarkEnabled;
+
+  // Resolve activities for selected workspace
+  const currentActivities = useMemo(() => {
+    return workspaceActivities.filter(act => act.workspaceId === activeWorkspaceId);
+  }, [workspaceActivities, activeWorkspaceId]);
+
+  // Resolve pending approvals list (workflows & activation requests)
+  const pendingApprovalsList = useMemo(() => {
+    const list: { id: string; label: string; desc: string; type: string; path?: string }[] = [];
+    workflows.forEach(w => {
+      if (w.status === 'pending' || w.status === 'submitted') {
+        list.push({
+          id: w.workflowId,
+          label: `${w.workflowType.toUpperCase()}: ${w.title}`,
+          desc: w.description,
+          type: 'workflow'
+        });
+      }
+    });
+    activationRequests.forEach(r => {
+      if (r.status === 'Pending') {
+        list.push({
+          id: r.id,
+          label: `ACTIVATION: ${r.vendorName}`,
+          desc: `App activation request for ${r.appName || 'Vendor'}.`,
+          type: 'activation',
+          path: '/activations'
+        });
+      }
+    });
+    return list;
+  }, [workflows, activationRequests]);
 
   return (
     <div id="itred_control_console" className="flex flex-col h-screen bg-[#F4F4F1] text-[#1A1A1A] font-sans overflow-hidden select-none relative">
       
       {/* DEMO MODE Watermark Overlay */}
-      {isDemoActive && (
+      {showDemoWatermark && (
         <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden opacity-[0.03] select-none flex items-center justify-center flex-wrap gap-12 rotate-[-15deg]">
           {Array.from({ length: 60 }).map((_, i) => (
             <div key={i} className="text-4xl font-mono font-black uppercase tracking-widest whitespace-nowrap">
-              DEMO MODE • LOCAL ONLY
+              {environmentState.label.toUpperCase()} • LOCAL ONLY
             </div>
           ))}
         </div>
@@ -1234,22 +1454,51 @@ function RequireAuthLayout() {
       <Toolbar
         activeStaffSession={activeStaffSession}
         onLogout={() => {
+          if (activeStaffSession) {
+            onAddWorkspaceAuditEvent({
+              workspaceId: activeWorkspaceId,
+              actorStaffId: activeStaffSession.staffId,
+              actorName: activeStaffSession.fullName,
+              activeDeskId: activeStaffSession.activeDeskId,
+              action: 'STAFF_LOGOUT',
+              targetType: 'session',
+              result: 'success',
+              message: `Staff member ${activeStaffSession.fullName} logged out.`
+            });
+          }
           setActiveStaffSession(null);
           setIsGoogleLoggedIn(false);
           localStorage.removeItem('sci_staff_session');
           localStorage.removeItem('sgn_is_logged_in');
           navigate('/login');
         }}
-        notifications={notifications}
+        notifications={workspaceNotifications}
         onNavigateToNotifications={() => navigate('/notifications')}
         onSearch={setSearchQuery}
         searchQuery={searchQuery}
-        isDemoActive={isDemoActive}
         activeWorkspaceLabel={activeWorkspace?.label || 'Home'}
         internalStaff={internalStaff}
         staffRoles={staffRoles}
         staffDesks={staffDesks}
         onDeskSwitch={handleDeskSwitch}
+        envMode={envMode}
+        onChangeEnvMode={onChangeEnvMode}
+        onMarkNotificationRead={onMarkWorkspaceNotificationRead}
+        onCommandClick={(item) => {
+          if (activeStaffSession) {
+            onAddWorkspaceAuditEvent({
+              workspaceId: activeWorkspaceId,
+              actorStaffId: activeStaffSession.staffId,
+              actorName: activeStaffSession.fullName,
+              activeDeskId: activeStaffSession.activeDeskId,
+              action: 'CLICK_COMMAND',
+              targetType: 'command',
+              targetId: item.searchId,
+              result: 'success',
+              message: `Clicked command: ${item.label}.`
+            });
+          }
+        }}
       />
 
       {/* MAIN CONTAINER SHELL */}
@@ -1281,7 +1530,7 @@ function RequireAuthLayout() {
             }
             setSearchQuery(''); // Reset search upon navigation
           }}
-          unreadNotificationsCount={notifications.filter((n: any) => !n.read).length}
+          unreadNotificationsCount={workspaceNotifications.filter((n: any) => !n.read).length}
           pendingActivationsCount={activationRequests.filter((r: any) => r.status === 'Pending').length}
           activeStaffSession={activeStaffSession}
           activeWorkspaceId={activeWorkspaceId}
@@ -1392,7 +1641,7 @@ function RequireAuthLayout() {
         </main>
 
         {/* Right Utility Panel */}
-        <div id="right_utility_panel" className="w-64 border-l border-[#D1D1CF] bg-white overflow-y-auto p-4 space-y-6 hidden xl:block shrink-0 font-mono text-[10px] text-[#1A1A1A]">
+        <div id="right_utility_panel" className="w-64 border-l border-[#D1D1CF] bg-[#FAF9F6] overflow-y-auto p-4 space-y-6 hidden xl:block shrink-0 font-mono text-[10px] text-[#1A1A1A]">
           
           {/* Recent Activity Card */}
           <div className="space-y-2">
@@ -1400,16 +1649,27 @@ function RequireAuthLayout() {
               <span>Recent Activity</span>
               <span className="w-1.5 h-1.5 bg-[#FF5A00] rounded-none animate-pulse" />
             </div>
-            <div className="space-y-1.5 leading-relaxed text-gray-500 font-sans">
-              <div className="bg-gray-50 p-2 border border-gray-150 rounded-none font-mono text-[9px]">
-                <span className="text-gray-400">14:02:11</span> Console resolved access for <strong className="text-gray-800 font-bold">{activeStaffSession?.fullName}</strong>.
-              </div>
-              <div className="bg-gray-50 p-2 border border-gray-150 rounded-none font-mono text-[9px]">
-                <span className="text-gray-400">13:44:02</span> Telemetry check for cluster <strong className="text-gray-800 font-bold">seiGEN_PROD_04</strong> completed.
-              </div>
-              <div className="bg-gray-50 p-2 border border-gray-150 rounded-none font-mono text-[9px]">
-                <span className="text-gray-400">11:15:30</span> POS licensing collection logs loaded.
-              </div>
+            <div className="space-y-1.5 leading-relaxed text-gray-500 font-sans max-h-40 overflow-y-auto pr-1">
+              {currentActivities.length === 0 ? (
+                <div className="text-[8px] text-gray-400 italic font-mono uppercase">NO RECENT WORKSPACE ACTIVITY</div>
+              ) : (
+                currentActivities.map((act) => (
+                  <div key={act.activityId} className="bg-white p-2 border border-gray-200 rounded-none font-mono text-[9px] text-[#1A1A1A] flex flex-col gap-0.5">
+                    <div className="flex justify-between items-center text-[7px] text-gray-400 font-mono">
+                      <span>[{new Date(act.createdAt).toLocaleTimeString()}]</span>
+                      <span className={`px-1 py-0.2 font-bold uppercase border ${
+                        act.severity === 'critical' ? 'border-red-500 text-red-600 bg-red-50' :
+                        act.severity === 'warning' ? 'border-yellow-500 text-yellow-600 bg-yellow-50' :
+                        act.severity === 'success' ? 'border-green-500 text-green-600 bg-green-50' :
+                        'border-blue-500 text-blue-600 bg-blue-50'
+                      }`}>{act.severity}</span>
+                    </div>
+                    <div className="font-bold text-[#1A1A1A] uppercase text-[8px] truncate mt-0.5">{act.title}</div>
+                    <div className="text-[8px] text-gray-500 normal-case leading-normal">{act.message}</div>
+                    <div className="text-[7px] text-gray-400 mt-0.5 font-bold">OPERATOR: {act.actorName}</div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -1418,15 +1678,25 @@ function RequireAuthLayout() {
             <div className="font-black text-gray-850 uppercase tracking-wider border-b border-[#D1D1CF] pb-1.5">
               Pending Approvals
             </div>
-            <div className="space-y-1.5">
-              <div className="bg-orange-50/50 p-2.5 border border-orange-205 text-orange-900 rounded-none">
-                <div className="font-bold text-[9px]">VENDOR: SPARKCORP</div>
-                <div className="text-[8px] text-gray-500 mt-0.5 font-sans normal-case">Awaiting compliance verification checks.</div>
-              </div>
-              <div className="bg-gray-50 p-2.5 border border-gray-150 rounded-none">
-                <div className="font-bold text-[9px]">LICENSE: L-801-RENEW</div>
-                <div className="text-[8px] text-gray-500 mt-0.5 font-sans normal-case">POS activation request keys waiting.</div>
-              </div>
+            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+              {pendingApprovalsList.length === 0 ? (
+                <div className="text-[8px] text-gray-400 italic">NO PENDING COMPLIANCE RUNS</div>
+              ) : (
+                pendingApprovalsList.map((item) => (
+                  <div 
+                    key={item.id} 
+                    onClick={() => item.path && navigate(item.path)}
+                    className={`p-2 border rounded-none text-left cursor-pointer transition-all ${
+                      item.type === 'activation'
+                        ? 'bg-orange-50/50 border-orange-250 hover:bg-orange-50 text-orange-950'
+                        : 'bg-white border-stone-200 hover:bg-[#F4F4F1] text-stone-850'
+                    }`}
+                  >
+                    <div className="font-bold text-[8px] truncate">{item.label}</div>
+                    <div className="text-[8px] text-gray-500 mt-0.5 font-sans normal-case truncate">{item.desc}</div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -1435,18 +1705,28 @@ function RequireAuthLayout() {
             <div className="font-black text-gray-850 uppercase tracking-wider border-b border-[#D1D1CF] pb-1.5">
               System Health
             </div>
-            <div className="bg-gray-50 p-3 border border-gray-150 rounded-none space-y-2 uppercase font-bold text-gray-650 text-[9px]">
+            <div className="bg-white p-3 border border-gray-200 rounded-none space-y-2 uppercase font-bold text-gray-650 text-[9px]">
               <div className="flex justify-between">
                 <span>Cluster Ingress:</span>
                 <span className="text-green-600">Stable</span>
               </div>
               <div className="flex justify-between">
-                <span>Diagnostic Tunnels:</span>
+                <span>Diag Tunnels:</span>
                 <span className="text-green-600">99.9% Online</span>
               </div>
               <div className="flex justify-between">
                 <span>Sync Node Cluster:</span>
                 <span className="text-green-600">Active</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Env Storage:</span>
+                <span className="text-orange-500">{environmentState.storageMode === 'localOnly' ? 'LOCAL ONLY' : 'CLOUD'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Firebase DB:</span>
+                <span className={environmentState.firebaseWritesAllowed ? 'text-green-600' : 'text-red-500'}>
+                  {environmentState.firebaseWritesAllowed ? 'WRITABLE' : 'LOCKED'}
+                </span>
               </div>
             </div>
           </div>
@@ -1460,19 +1740,82 @@ function RequireAuthLayout() {
               <button
                 onClick={() => {
                   alert("Telemetry logs flushed. Broadcast channel refreshed.");
+                  if (activeStaffSession) {
+                    onAddWorkspaceAuditEvent({
+                      workspaceId: activeWorkspaceId,
+                      actorStaffId: activeStaffSession.staffId,
+                      actorName: activeStaffSession.fullName,
+                      activeDeskId: activeStaffSession.activeDeskId,
+                      action: 'CLICK_COMMAND',
+                      targetType: 'quick_action',
+                      targetId: 'flush_telemetry',
+                      result: 'success',
+                      message: `Operator triggered telemetry flush for uplink channel.`
+                    });
+                  }
                 }}
-                className="w-full text-left p-2 border border-gray-200 hover:border-[#1A1A1A] bg-gray-50 hover:bg-[#1A1A1A] hover:text-white uppercase font-bold transition-all rounded-none cursor-pointer"
+                className="w-full text-left p-2 border border-gray-200 hover:border-[#1A1A1A] bg-white hover:bg-[#1A1A1A] hover:text-white uppercase font-bold transition-all rounded-none cursor-pointer"
               >
                 Flush Telemetry Tunnels
               </button>
               <button
                 onClick={() => {
                   alert("Diagnostics ping dispatched across 3 data center regions.");
+                  if (activeStaffSession) {
+                    onAddWorkspaceAuditEvent({
+                      workspaceId: activeWorkspaceId,
+                      actorStaffId: activeStaffSession.staffId,
+                      actorName: activeStaffSession.fullName,
+                      activeDeskId: activeStaffSession.activeDeskId,
+                      action: 'CLICK_COMMAND',
+                      targetType: 'quick_action',
+                      targetId: 'trigger_ping',
+                      result: 'success',
+                      message: `Operator triggered multi-region diagnostics ping.`
+                    });
+                  }
                 }}
-                className="w-full text-left p-2 border border-gray-200 hover:border-[#1A1A1A] bg-gray-50 hover:bg-[#1A1A1A] hover:text-white uppercase font-bold transition-all rounded-none cursor-pointer"
+                className="w-full text-left p-2 border border-gray-200 hover:border-[#1A1A1A] bg-white hover:bg-[#1A1A1A] hover:text-white uppercase font-bold transition-all rounded-none cursor-pointer"
               >
                 Trigger Diagnostic Ping
               </button>
+            </div>
+          </div>
+
+          {/* Workflow Queue Card */}
+          <div className="space-y-2 font-mono">
+            <div className="font-black text-gray-850 uppercase tracking-wider border-b border-[#D1D1CF] pb-1.5 flex justify-between items-center">
+              <span>Workflow Queue</span>
+              <span className="bg-orange-100 text-[#FF5A00] px-1 py-0.2 text-[8px] font-bold">{workflows.length} RUNNING</span>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {workflows.map((w) => {
+                const percent = Math.round((w.currentStep / w.totalSteps) * 100);
+                return (
+                  <div key={w.workflowId} className="bg-white p-2.5 border border-gray-200 rounded-none space-y-1.5 font-mono">
+                    <div className="flex justify-between items-center text-[8px] font-bold">
+                      <span className="text-gray-800 uppercase">{w.title}</span>
+                      <span className={`px-1 py-0.2 text-[7px] uppercase border ${
+                        w.status === 'completed' || w.status === 'approved' ? 'border-green-500 text-green-600 bg-green-50' :
+                        w.status === 'rejected' || w.status === 'cancelled' ? 'border-red-500 text-red-600 bg-red-50' :
+                        'border-orange-500 text-orange-600 bg-orange-50'
+                      }`}>{w.status}</span>
+                    </div>
+                    <div className="text-[8px] text-gray-500 font-sans normal-case leading-normal">{w.description}</div>
+                    
+                    {/* Flat Progress Bar */}
+                    <div className="space-y-0.5">
+                      <div className="flex justify-between text-[7px] text-gray-400 font-mono">
+                        <span>STEP {w.currentStep}/{w.totalSteps}</span>
+                        <span>{percent}%</span>
+                      </div>
+                      <div className="w-full bg-stone-100 h-1.5 rounded-none overflow-hidden border border-gray-200">
+                        <div className="bg-[#FF5A00] h-full" style={{ width: `${percent}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1640,26 +1983,90 @@ function FinanceRoute() {
 }
 
 function NotificationsRoute() {
-  const { notifications, handleMarkAllRead, handleClearNotifications, handleToggleRead } = useLifecycle();
+  const { 
+    workspaceNotifications, 
+    onMarkWorkspaceNotificationRead
+  } = useLifecycle();
+
+  // Map SCIWorkspaceNotification to AppNotification
+  const mappedNotifications = React.useMemo(() => {
+    return workspaceNotifications.map((n: any) => ({
+      id: n.notificationId,
+      timestamp: n.createdAt,
+      title: n.title,
+      message: n.message,
+      type: (n.type === 'approval' ? 'warning' : (n.type === 'security' ? 'alert' : n.type === 'license' ? 'info' : n.type)) as any,
+      read: n.read
+    }));
+  }, [workspaceNotifications]);
+
+  const handleMarkAllRead = () => {
+    workspaceNotifications.forEach((n: any) => {
+      if (!n.read) {
+        onMarkWorkspaceNotificationRead(n.notificationId);
+      }
+    });
+  };
+
+  const handleClearNotifications = () => {
+    localStorage.setItem('sci_workspace_notifications', JSON.stringify([]));
+    window.location.reload();
+  };
+
   return (
     <NotificationsView
-      notifications={notifications}
+      notifications={mappedNotifications}
       onMarkAllRead={handleMarkAllRead}
       onClearNotifications={handleClearNotifications}
-      onToggleRead={handleToggleRead}
+      onToggleRead={(id) => onMarkWorkspaceNotificationRead(id)}
     />
   );
 }
 
 function AuditRoute() {
-  const { auditLogs, searchQuery, selectedAuditActor, setSelectedAuditActor } = useLifecycle();
+  const { 
+    workspaceAuditEvents, 
+    searchQuery, 
+    selectedAuditActor, 
+    setSelectedAuditActor,
+    onClearWorkspaceAuditEvents
+  } = useLifecycle();
+
+  // Map SCIWorkspaceAuditEvent to AuditLog
+  const mappedLogs = React.useMemo(() => {
+    return workspaceAuditEvents.map((e: any) => ({
+      id: e.auditId,
+      timestamp: e.createdAt,
+      actor: e.actorName,
+      action: e.action,
+      target: e.targetId ? `${e.targetType.toUpperCase()}: ${e.targetId}` : e.targetType.toUpperCase(),
+      status: (e.result === 'success' ? 'Success' : e.result === 'warning' ? 'Warning' : 'Failed') as any
+    }));
+  }, [workspaceAuditEvents]);
+
   return (
-    <AuditLogsView
-      logs={auditLogs}
-      searchQuery={searchQuery}
-      onActorFilter={setSelectedAuditActor}
-      selectedActor={selectedAuditActor}
-    />
+    <div className="space-y-4">
+      {workspaceAuditEvents.length > 0 && (
+        <div className="flex justify-end pr-2">
+          <button
+            onClick={() => {
+              if (confirm("Are you sure you want to clear all compliance audit logs?")) {
+                onClearWorkspaceAuditEvents();
+              }
+            }}
+            className="border border-red-650 text-red-650 hover:bg-red-650 hover:text-white px-3 py-1.5 text-xs font-mono font-bold transition-colors cursor-pointer"
+          >
+            FLUSH AUDIT SEAL
+          </button>
+        </div>
+      )}
+      <AuditLogsView
+        logs={mappedLogs}
+        searchQuery={searchQuery}
+        onActorFilter={setSelectedAuditActor}
+        selectedActor={selectedAuditActor}
+      />
+    </div>
   );
 }
 

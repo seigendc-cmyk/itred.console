@@ -1,21 +1,27 @@
 import React, { useState } from 'react';
-import { Search, Bell, User, ChevronDown, LogOut, ShieldAlert } from 'lucide-react';
-import { AppNotification } from '../types';
+import { Search, Bell, User, ChevronDown, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { SCIStaffSession, SCIInternalStaff, SCIStaffDesk, SCIStaffRole } from '../internal/staffTypes';
+import { SCIWorkspaceNotification } from '../workspace/workspaceNotifications';
+import { SCIEnvironmentMode } from '../workspace/workspaceEnvironment';
+import { searchWorkspaceIndex, SCIWorkspaceSearchItem } from '../workspace/workspaceSearch';
 
 interface ToolbarProps {
   activeStaffSession: SCIStaffSession | null;
   onLogout: () => void;
-  notifications: AppNotification[];
+  notifications: SCIWorkspaceNotification[];
   onNavigateToNotifications: () => void;
   onSearch: (query: string) => void;
   searchQuery: string;
-  isDemoActive?: boolean;
   activeWorkspaceLabel: string;
   internalStaff: SCIInternalStaff[];
   staffRoles: SCIStaffRole[];
   staffDesks: SCIStaffDesk[];
   onDeskSwitch: (deskId: string) => void;
+  envMode: SCIEnvironmentMode;
+  onChangeEnvMode: (mode: SCIEnvironmentMode) => void;
+  onMarkNotificationRead: (notificationId: string) => void;
+  onCommandClick?: (item: SCIWorkspaceSearchItem) => void;
 }
 
 export default function Toolbar({
@@ -25,17 +31,26 @@ export default function Toolbar({
   onNavigateToNotifications,
   onSearch,
   searchQuery,
-  isDemoActive = false,
   activeWorkspaceLabel,
   internalStaff,
   staffRoles,
   staffDesks,
-  onDeskSwitch
+  onDeskSwitch,
+  envMode,
+  onChangeEnvMode,
+  onMarkNotificationRead,
+  onCommandClick
 }: ToolbarProps) {
+  const navigate = useNavigate();
   const [showAdminDropdown, setShowAdminDropdown] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  // Resolve search results
+  const searchResults = React.useMemo(() => {
+    return searchWorkspaceIndex(searchQuery);
+  }, [searchQuery]);
 
   // Resolve assigned desks for active operator profile
   const activeStaff = React.useMemo(() => {
@@ -68,7 +83,7 @@ export default function Toolbar({
         <input
           id="search_input"
           type="text"
-          placeholder="Search entities..."
+          placeholder="Search workspaces & cmds..."
           value={searchQuery}
           onChange={(e) => onSearch(e.target.value)}
           className="w-full bg-[#F4F4F1] border-none pl-9 pr-4 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:ring-1 focus:ring-[#FF5A00] placeholder-gray-400 rounded-none uppercase tracking-wider font-mono"
@@ -82,30 +97,59 @@ export default function Toolbar({
             ESC
           </button>
         )}
+        {searchQuery && searchResults.length > 0 && (
+          <div id="search_results_dropdown" className="absolute top-10 left-0 w-80 bg-white border-2 border-[#1A1A1A] z-50 shadow-md font-mono text-[10px] text-[#1A1A1A] max-h-64 overflow-y-auto p-1">
+            <div className="px-2 py-1 text-[8px] font-bold text-gray-455 border-b border-gray-150 uppercase tracking-widest">
+              Search Results ({searchResults.length})
+            </div>
+            {searchResults.map((item) => (
+              <button
+                id={`search_result_item_${item.searchId}`}
+                key={item.searchId}
+                onClick={() => {
+                  if (item.targetPath) {
+                    navigate(item.targetPath);
+                  }
+                  if (item.type === 'command') {
+                    onCommandClick?.(item);
+                  }
+                  onSearch('');
+                }}
+                className="w-full text-left px-2 py-2 hover:bg-[#F4F4F1] border-b border-stone-100 last:border-0 flex flex-col gap-0.5 cursor-pointer"
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-[#1A1A1A] uppercase text-[10px]">{item.label}</span>
+                  <span className={`px-1 py-0.2 text-[7px] font-bold border ${
+                    item.type === 'workspace' 
+                      ? 'border-[#FF5A00] text-[#FF5A00] bg-orange-50' 
+                      : 'border-[#1A1A1A] text-[#1A1A1A] bg-stone-100'
+                  }`}>
+                    {item.type.toUpperCase()}
+                  </span>
+                </div>
+                <span className="text-gray-500 font-sans text-[9px] truncate normal-case">{item.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Center/Right controls */}
       <div id="toolbar_actions" className="flex items-center space-x-5">
         
-        {/* Global Storage Mode Indicator */}
-        <div id="storage_mode_indicator" className="flex items-center space-x-2 border-r border-[#D1D1CF] pr-5 font-mono text-[10px]">
-          <span className="text-gray-500 uppercase tracking-wider">Storage Mode:</span>
-          <div className="flex border border-[#D1D1CF] p-0.5 bg-[#F4F4F1] rounded-none">
-            <div className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-none ${
-              isDemoActive 
-                ? 'bg-[#FF5A00] text-white shadow-sm' 
-                : 'bg-transparent text-gray-500 opacity-60'
-            }`}>
-              Local Demo
-            </div>
-            <div className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-none cursor-not-allowed select-none ${
-              !isDemoActive 
-                ? 'bg-gray-400 text-white shadow-sm' 
-                : 'text-gray-450 opacity-40'
-            }`}>
-              Cloud Prod
-            </div>
-          </div>
+        {/* Environment Mode Switcher */}
+        <div id="environment_mode_container" className="flex items-center space-x-2 border-r border-[#D1D1CF] pr-5 font-mono text-[10px]">
+          <span className="text-gray-500 uppercase tracking-wider">ENV MODE:</span>
+          <select
+            value={envMode}
+            onChange={(e) => onChangeEnvMode(e.target.value as SCIEnvironmentMode)}
+            className="bg-[#F4F4F1] border border-[#D1D1CF] px-2 py-1 text-[9px] font-bold uppercase tracking-wider focus:outline-none focus:border-[#FF5A00] text-gray-800 cursor-pointer rounded-none"
+          >
+            <option value="prototype">Prototype</option>
+            <option value="local_demo">Local Demo</option>
+            <option value="staging">Staging</option>
+            <option value="production" disabled>Production (Disabled)</option>
+          </select>
         </div>
         
         {/* Active Console/Desk Dropdown Switcher */}
@@ -137,7 +181,6 @@ export default function Toolbar({
             }}
             className="flex items-center space-x-2 px-3 py-1.5 border border-[#D1D1CF] bg-[#F4F4F1] text-xs font-sans text-[#1A1A1A] hover:border-[#FF5A00] transition-colors rounded-none font-bold"
           >
-            <User className="w-3.5 h-3.5 text-[#FF5A00]" />
             <span className="uppercase tracking-wider font-mono">{activeStaffSession?.fullName || 'Anonymous'}</span>
             <span className="text-[9px] bg-gray-200 text-gray-700 px-1 font-mono font-semibold uppercase">{activeStaffSession?.roleId.replace('role_', '') || 'guest'}</span>
             
@@ -221,23 +264,39 @@ export default function Toolbar({
                 ) : (
                   notifications.slice(0, 4).map((notif) => (
                     <div
-                      key={notif.id}
-                      className={`p-2.5 border-b border-gray-100 last:border-0 text-xs hover:bg-[#F4F4F1] ${
+                      key={notif.notificationId}
+                      className={`p-2.5 border-b border-gray-100 last:border-0 text-xs hover:bg-[#F4F4F1] relative ${
                         !notif.read ? 'border-l-2 border-l-[#FF5A00] bg-orange-50/10' : ''
                       }`}
                     >
                       <div className="flex justify-between items-start mb-0.5">
-                        <span className={`font-semibold text-[10px] px-1 uppercase ${
-                          notif.type === 'alert' ? 'bg-red-100 text-red-800' :
-                          notif.type === 'warning' ? 'bg-yellow-100 text-yellow-800' :
-                          notif.type === 'success' ? 'bg-green-100 text-green-800' :
-                          'bg-blue-100 text-blue-800'
+                        <span className={`font-semibold text-[9px] px-1 uppercase ${
+                          notif.type === 'approval' ? 'bg-yellow-100 text-yellow-800' :
+                          notif.type === 'security' ? 'bg-red-100 text-red-800' :
+                          notif.type === 'license' ? 'bg-blue-100 text-blue-800' :
+                          'bg-stone-100 text-stone-850'
                         }`}>
                           {notif.type}
                         </span>
-                        <span className="text-[9px] text-gray-450">{notif.timestamp.split('T')[1].slice(0, 5)}</span>
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-[8px] text-gray-400">{new Date(notif.createdAt).toLocaleTimeString()}</span>
+                          {!notif.read && (
+                            <button
+                              id={`mark_read_btn_${notif.notificationId}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onMarkNotificationRead(notif.notificationId);
+                              }}
+                              className="text-[8px] text-[#FF5A00] hover:text-orange-700 font-bold uppercase underline cursor-pointer"
+                              title="Mark as Read"
+                            >
+                              Ack
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-gray-600 leading-normal font-sans mt-1 text-[11px]">{notif.message}</p>
+                      <p className="font-sans font-bold text-[#1A1A1A] text-[10px] uppercase">{notif.title}</p>
+                      <p className="text-gray-600 leading-normal font-sans mt-0.5 text-[9px]">{notif.message}</p>
                     </div>
                   ))
                 )}
