@@ -85,6 +85,10 @@ export interface RPNAgent {
   monthlyTarget?: string;
   commissionModel?: string;
   performance?: 'Exceeding' | 'On Track' | 'Needs Attention';
+  phone?: string;
+  email?: string;
+  conversionRate?: number;
+  commissionDue?: number;
 }
 
 export interface AuditLog {
