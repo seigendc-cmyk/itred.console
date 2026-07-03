@@ -10,6 +10,7 @@ export const SCI_FIREBASE_COLLECTIONS = {
   capacityAddons: "capacity_addons",
   businessModules: "business_modules",
   posLicenses: "pos_licenses",
+  posActivations: "pos_activations",
   appLicenses: "app_licenses",
   activationRequests: "activation_requests",
   rpnAgents: "rpn_agents",

@@ -18,6 +18,8 @@ export interface Vendor {
   assignedPlanId?: string;
   assignedPlanName?: string;
   licenseKey?: string;
+  licenseMode?: 'demo' | 'production';
+  storageMode?: 'localOnly' | 'cloud';
   linkedRpnId?: string;
   linkedRpnName?: string;
 }
@@ -42,7 +44,7 @@ export interface POSLicense {
   vendorName: string;
   terminalId: string;
   licenseKey: string;
-  status: 'Active' | 'Expired' | 'Pending' | 'Suspended' | 'Deactivated';
+  status: 'Active' | 'Expired' | 'Pending' | 'Suspended' | 'Deactivated' | 'Revoked';
   issuedAt: string;
   planName?: string;
   expiryDate?: string;
@@ -179,4 +181,3 @@ export interface StaffMember {
   deskId: string; // The ID of the assigned desk
   welcomeMessage?: string;
 }
-

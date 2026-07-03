@@ -1,8 +1,36 @@
 import { POSLicense } from '../types/licensing';
 import { Vendor, POSLicense as OldPOSLicense } from '../types';
+import { getPOSActivationRecords } from './posActivationBridge';
 
 export const licenseReaderService = {
   async getPOSLicense(vendorId: string): Promise<POSLicense | null> {
+    const activation = getPOSActivationRecords()
+      .filter(record => record.vendorId === vendorId)
+      .sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime())[0];
+
+    if (activation) {
+      return {
+        licenseId: activation.licenseId,
+        vendorId: activation.vendorId,
+        vendorName: activation.vendorName,
+        planId: activation.planId,
+        planName: activation.planName,
+        status: activation.status,
+        licenseMode: activation.licenseMode,
+        storageMode: activation.storageMode,
+        maxBranches: activation.maxBranches,
+        maxTerminals: activation.maxTerminals,
+        maxStaff: activation.maxStaff,
+        maxProducts: activation.maxProducts,
+        startsAt: activation.startsAt,
+        expiresAt: activation.expiresAt,
+        issuedBy: activation.issuedBy,
+        issuedAt: activation.issuedAt,
+        updatedAt: activation.updatedAt,
+        notes: activation.notes,
+      };
+    }
+
     const vendorsSaved = localStorage.getItem('sgn_vendors');
     const licensesSaved = localStorage.getItem('sgn_pos_licenses');
     

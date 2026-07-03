@@ -1,4 +1,4 @@
-import type { SCIPOSLicense } from "../domain";
+import type { SCIPOSActivation, SCIPOSLicense } from "../domain";
 import type { POSActivationRecord } from "../licensing/posActivationTypes";
 
 export function posActivationRecordToSCIPOSLicense(
@@ -27,17 +27,35 @@ export function posActivationRecordToSCIPOSLicense(
   };
 }
 
+export function posActivationRecordToFirestoreActivation(
+  record: POSActivationRecord
+): SCIPOSActivation {
+  return {
+    ...record,
+    id: record.activationId,
+    createdAt: record.issuedAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
 export function sciPOSLicenseToPOSActivationRecord(
   license: SCIPOSLicense,
   vendorName = "Unknown Vendor",
-  planName = "Unknown Plan"
+  planName = "Unknown Plan",
+  ownerEmail = "unknown@itred.local"
 ): POSActivationRecord {
   return {
+    activationId: `POS-ACT-${license.licenseId}`,
     licenseId: license.licenseId,
     vendorId: license.vendorId,
     vendorName,
+    ownerEmail,
     planId: license.planId,
     planName,
+    branchId: "BR-UNKNOWN",
+    branchName: "Default Branch",
+    terminalId: `TRM-${license.licenseId}`,
+    terminalCode: `TERM-${license.licenseId}`,
     status:
       license.status === "active"
         ? "active"

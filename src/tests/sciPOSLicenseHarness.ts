@@ -4,11 +4,17 @@ import { validatePOSLicense } from "../licensing";
 
 export function runSCIPOSLicenseHarness() {
   const activeRecord: POSActivationRecord = {
+    activationId: "POS-ACT-HARNESS-001",
     licenseId: "POS-LIC-HARNESS-001",
     vendorId: "vendor_harness_001",
     vendorName: "Harness Hardware",
+    ownerEmail: "owner@harness.test",
     planId: "professional",
     planName: "Professional",
+    branchId: "BR-HARNESS-001",
+    branchName: "Harness Main",
+    terminalId: "TRM-HARNESS-001",
+    terminalCode: "TERM-HARNESS-001",
     status: "active",
     licenseMode: "production",
     storageMode: "cloud",
@@ -50,6 +56,7 @@ export function runSCIPOSLicenseHarness() {
 
   const expiredRecord: POSActivationRecord = {
     ...activeRecord,
+    activationId: "POS-ACT-HARNESS-002",
     licenseId: "POS-LIC-HARNESS-002",
     expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
   };
@@ -60,6 +67,7 @@ export function runSCIPOSLicenseHarness() {
 
   const demoRecord: POSActivationRecord = {
     ...activeRecord,
+    activationId: "POS-ACT-HARNESS-003",
     licenseId: "POS-LIC-HARNESS-003",
     licenseMode: "demo",
     storageMode: "localOnly",

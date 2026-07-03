@@ -1,6 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { useLifecycle } from '../App';
 import { POSLicense, Vendor, Plan } from '../types';
+import type { POSActivationRecord, POSLicenseMode, POSStorageMode } from '../licensing';
+import { createPOSActivationRecord, getPOSActivationRecords } from '../services/posActivationBridge';
+import { posActivationRecordToFirestoreActivation, posActivationRecordToSCIPOSLicense } from '../adapters';
+import { safeFirestoreWrite } from '../firebase/gateway';
+import { canWriteToFirestore, getSCIFirestoreModeState } from '../firebase/mode';
+import type { SCIVendor } from '../domain';
 import { 
   Terminal, 
   Plus, 
@@ -24,8 +30,57 @@ import {
   Layers,
   Activity,
   User,
-  AlertCircle
+  AlertCircle,
+  ShieldCheck
 } from 'lucide-react';
+
+const NEW_VENDOR_OPTION = '__new_vendor__';
+
+function toDateInputValue(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function createId(prefix: string) {
+  return `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+function createCode(label: string, prefix: string) {
+  const cleaned = label
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 12);
+
+  return `${prefix}-${cleaned || 'NODE'}-${Math.floor(100 + Math.random() * 900)}`;
+}
+
+function createPOSLicenseKey() {
+  return `ITRD-POS-${Math.floor(1000 + Math.random() * 9000)
+    .toString(16)
+    .toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)
+    .toString(16)
+    .toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)
+    .toString(16)
+    .toUpperCase()}`;
+}
+
+function parsePlanLimit(value: string | undefined, fallback: number) {
+  if (!value) return fallback;
+  if (value.toLowerCase().includes('unlimited')) return 999999;
+
+  const parsed = Number.parseInt(value.replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getEmailName(email: string) {
+  return email.split('@')[0]?.replace(/[._-]+/g, ' ').trim() || 'New Vendor';
+}
 
 export default function POSLicensingView() {
   const { 
@@ -34,6 +89,7 @@ export default function POSLicensingView() {
     vendors, 
     setVendors,
     plans,
+    googleEmail,
     envMode,
     onChangeEnvMode,
     activeStaffSession,
@@ -132,6 +188,7 @@ export default function POSLicensingView() {
       'POS_LICENSE_SUSPEND', 
       'POS_LICENSE_REVOKE', 
       'POS_LICENSE_EXPIRE',
+      'POS_LICENSE_ACTIVATE',
       'VENDOR_DEMO_START',
       'VENDOR_DEMO_CONVERSION'
     ];
@@ -154,7 +211,322 @@ export default function POSLicensingView() {
   const [issueVendorId, setIssueVendorId] = useState('');
   const [issuePlanId, setIssuePlanId] = useState('');
 
+  // Form States - Authority Activation Drawer
+  const [isActivationDrawerOpen, setIsActivationDrawerOpen] = useState(false);
+  const [isActivatingLicense, setIsActivatingLicense] = useState(false);
+  const [activationNotice, setActivationNotice] = useState<string | null>(null);
+  const [activationVendorId, setActivationVendorId] = useState('');
+  const [activationOwnerEmail, setActivationOwnerEmail] = useState(googleEmail || '');
+  const [activationPlanId, setActivationPlanId] = useState('');
+  const [activationBranchName, setActivationBranchName] = useState('Main Branch');
+  const [activationTerminalName, setActivationTerminalName] = useState('Main POS Terminal');
+  const [activationTerminalCode, setActivationTerminalCode] = useState('TERM-MAIN-001');
+  const [activationStartDate, setActivationStartDate] = useState(() => toDateInputValue(new Date()));
+  const [activationExpiryDate, setActivationExpiryDate] = useState(() => toDateInputValue(addDays(new Date(), 365)));
+  const [activationLicenseMode, setActivationLicenseMode] = useState<POSLicenseMode>('production');
+  const [activationStorageMode, setActivationStorageMode] = useState<POSStorageMode>('cloud');
+
+  const posPlanOptions = useMemo(() => {
+    return plans.filter(p => p.type === 'POS' || p.type === 'Hybrid');
+  }, [plans]);
+
+  const activationRecords = useMemo(() => {
+    return getPOSActivationRecords();
+  }, [posLicenses, vendors]);
+
   // Operations Handlers
+
+  const openActivationDrawer = () => {
+    const firstVendor = vendors[0];
+    const firstPlan =
+      posPlanOptions.find(p => p.id !== 'VENDOR_DEMO') ||
+      posPlanOptions[0] ||
+      plans[0];
+
+    setActivationVendorId(firstVendor?.id || NEW_VENDOR_OPTION);
+    setActivationOwnerEmail(firstVendor?.email || googleEmail || '');
+    setActivationPlanId(firstPlan?.id || '');
+    setActivationBranchName(firstVendor ? `${firstVendor.name} Main` : 'Main Branch');
+    setActivationTerminalName('Main POS Terminal');
+    setActivationTerminalCode(createCode(firstVendor?.code || firstVendor?.name || 'main', 'TERM'));
+    setActivationStartDate(toDateInputValue(new Date()));
+    setActivationExpiryDate(toDateInputValue(addDays(new Date(), firstPlan?.id === 'VENDOR_DEMO' ? 30 : 365)));
+    setActivationLicenseMode(firstPlan?.id === 'VENDOR_DEMO' ? 'demo' : 'production');
+    setActivationStorageMode(firstPlan?.id === 'VENDOR_DEMO' ? 'localOnly' : 'cloud');
+    setActivationNotice(null);
+    setIsActivationDrawerOpen(true);
+  };
+
+  const handleActivationVendorChange = (vendorId: string) => {
+    setActivationVendorId(vendorId);
+
+    if (vendorId === NEW_VENDOR_OPTION) {
+      setActivationBranchName('Main Branch');
+      setActivationTerminalCode(createCode('new vendor', 'TERM'));
+      return;
+    }
+
+    const vendor = vendors.find(v => v.id === vendorId);
+    if (!vendor) return;
+
+    setActivationOwnerEmail(vendor.email || googleEmail || '');
+    setActivationBranchName(`${vendor.name} Main`);
+    setActivationTerminalCode(createCode(vendor.code || vendor.name, 'TERM'));
+  };
+
+  const handleActivationPlanChange = (planId: string) => {
+    setActivationPlanId(planId);
+    const plan = plans.find(p => p.id === planId);
+
+    if (plan?.id === 'VENDOR_DEMO') {
+      setActivationLicenseMode('demo');
+      setActivationStorageMode('localOnly');
+      setActivationExpiryDate(toDateInputValue(addDays(new Date(), 30)));
+      return;
+    }
+
+    setActivationLicenseMode('production');
+    setActivationStorageMode('cloud');
+    setActivationExpiryDate(toDateInputValue(addDays(new Date(), 365)));
+  };
+
+  const buildFirestoreVendor = (
+    vendor: Vendor,
+    now: string,
+    issuedBy: string
+  ): SCIVendor => ({
+    id: vendor.id,
+    vendorId: vendor.id,
+    ownerUid: vendor.email,
+    ownerEmail: vendor.email,
+    businessName: vendor.name,
+    tradingName: vendor.tradingName || vendor.name,
+    businessType: vendor.category,
+    country: vendor.country || 'Unknown',
+    city: vendor.city || vendor.location || 'Control Centre',
+    physicalAddress: vendor.address,
+    contactPhone: vendor.phone,
+    status: vendor.status === 'Suspended' ? 'suspended' : 'active',
+    planId: vendor.assignedPlanId,
+    licenseMode: vendor.licenseMode || activationLicenseMode,
+    storageMode: vendor.storageMode || activationStorageMode,
+    isDemoVendor: (vendor.licenseMode || activationLicenseMode) === 'demo',
+    createdAt: now,
+    updatedAt: now,
+    createdBy: issuedBy,
+    updatedBy: issuedBy,
+  });
+
+  const handleActivatePOSLicense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActivationNotice(null);
+
+    const plan = plans.find(p => p.id === activationPlanId);
+    if (!plan) return alert('Please select a valid POS plan.');
+
+    const ownerEmail = activationOwnerEmail.trim();
+    const branchName = activationBranchName.trim();
+    const terminalName = activationTerminalName.trim();
+    const terminalCode = activationTerminalCode.trim().toUpperCase();
+
+    if (!ownerEmail || !ownerEmail.includes('@')) return alert('Owner Google Email is required.');
+    if (!branchName) return alert('Branch name is required.');
+    if (!terminalName) return alert('Terminal name is required.');
+    if (!terminalCode) return alert('Terminal code is required.');
+    if (!activationStartDate || !activationExpiryDate) return alert('Start and expiry dates are required.');
+    if (new Date(activationExpiryDate).getTime() <= new Date(activationStartDate).getTime()) {
+      return alert('Expiry date must be after the start date.');
+    }
+    if (activationLicenseMode === 'production' && activationStorageMode !== 'cloud') {
+      return alert('Production POS licenses must use cloud storage mode.');
+    }
+
+    setIsActivatingLicense(true);
+
+    try {
+      const now = new Date().toISOString();
+      const issuedBy = activeStaffSession?.fullName || googleEmail || 'SCI Control Centre';
+      const actorStaffId = activeStaffSession?.staffId || 'system';
+      const existingVendor = vendors.find(v => v.id === activationVendorId);
+      const createdVendor = !existingVendor;
+      const vendorId = existingVendor?.id || createId('VND');
+      const vendorName =
+        existingVendor?.name ||
+        `${branchName || getEmailName(ownerEmail)} Vendor`;
+      const vendorCode = existingVendor?.code || createCode(vendorName, 'VND');
+      const licenseId = createId('POS-LIC');
+      const activationId = createId('POS-ACT');
+      const branchId = createId('BR');
+      const terminalId = createId('TRM');
+      const licenseKey = createPOSLicenseKey();
+
+      const updatedVendor: Vendor = {
+        ...(existingVendor || {
+          id: vendorId,
+          name: vendorName,
+          category: 'POS Merchant',
+          status: 'Active' as const,
+          code: vendorCode,
+          joinedDate: activationStartDate,
+          location: branchName,
+        }),
+        id: vendorId,
+        name: vendorName,
+        code: vendorCode,
+        email: ownerEmail,
+        assignedPlanId: plan.id,
+        assignedPlanName: plan.name,
+        licenseKey,
+        licenseMode: activationLicenseMode,
+        storageMode: activationStorageMode,
+      };
+
+      const updatedVendors = existingVendor
+        ? vendors.map(v => (v.id === vendorId ? updatedVendor : v))
+        : [updatedVendor, ...vendors];
+
+      const newLicense: POSLicense = {
+        id: licenseId,
+        vendorName,
+        terminalId,
+        licenseKey,
+        status: 'Active',
+        issuedAt: activationStartDate,
+        planName: plan.name,
+        expiryDate: activationExpiryDate,
+        notes: `Authority activation ${activationId}: ${branchName} / ${terminalName}`,
+        billingCycle: plan.interval === 'Annual' ? 'Yearly' : 'Monthly',
+        tokenPrice: plan.price,
+        collectionTag: `${activationLicenseMode} ${activationStorageMode}`,
+      };
+
+      const updatedLicenses = [newLicense, ...posLicenses];
+      const activationRecord: POSActivationRecord = createPOSActivationRecord({
+        activationId,
+        licenseId,
+        vendorId,
+        vendorName,
+        ownerEmail,
+        planId: plan.id,
+        planName: plan.name,
+        branchId,
+        branchName,
+        terminalId,
+        terminalCode,
+        status: 'active',
+        licenseMode: activationLicenseMode,
+        storageMode: activationStorageMode,
+        maxBranches: parsePlanLimit(plan.maxBranches, 1),
+        maxTerminals: parsePlanLimit(plan.maxTerminals, 1),
+        maxStaff: parsePlanLimit(plan.maxStaff, 3),
+        maxProducts: parsePlanLimit(plan.maxProducts, 500),
+        startsAt: activationStartDate,
+        expiresAt: activationExpiryDate,
+        issuedBy,
+        notes: `Terminal name: ${terminalName}`,
+      });
+
+      setVendors(updatedVendors);
+      setPosLicenses(updatedLicenses);
+      localStorage.setItem('sgn_vendors', JSON.stringify(updatedVendors));
+      localStorage.setItem('sgn_pos_licenses', JSON.stringify(updatedLicenses));
+
+      let firestoreMessage = 'Firestore write mode is disabled; activation saved locally.';
+      let firestoreResult: 'success' | 'warning' = 'success';
+
+      if (canWriteToFirestore()) {
+        const mode = getSCIFirestoreModeState();
+        const structuredLicense = posActivationRecordToSCIPOSLicense(activationRecord);
+        const structuredActivation = posActivationRecordToFirestoreActivation(activationRecord);
+        const firestoreVendor = buildFirestoreVendor(updatedVendor, now, actorStaffId);
+
+        const result = await safeFirestoreWrite(async (repositories) => {
+          if (!repositories.licensing) throw new Error('Licensing repository is unavailable.');
+
+          if (createdVendor) {
+            if (!repositories.vendors) throw new Error('Vendor repository is unavailable.');
+            await repositories.vendors.upsertVendor(firestoreVendor);
+          }
+
+          await repositories.licensing.upsertPOSLicense(structuredLicense);
+          await repositories.licensing.upsertPOSActivation(structuredActivation);
+          await repositories.licensing.upsertLicenseEvent({
+            id: `evt_${activationId}`,
+            eventId: `evt_${activationId}`,
+            vendorId,
+            licenseId,
+            licenseType: 'pos',
+            action: 'activate',
+            previousStatus: 'none',
+            newStatus: 'active',
+            actorId: actorStaffId,
+            actorName: issuedBy,
+            message: `Control Centre activated POS license ${licenseId} for ${vendorName}.`,
+            createdAt: now,
+          });
+
+          return activationRecord;
+        });
+
+        if (result.success) {
+          firestoreMessage = `${mode.label}: activation written to Firestore.`;
+        } else {
+          firestoreResult = 'warning';
+          firestoreMessage = `${mode.label}: local activation created, Firestore write failed (${result.message}).`;
+        }
+      }
+
+      onAddWorkflow({
+        workflowType: 'pos_license',
+        title: `POS Activation: ${vendorName}`,
+        description: `Activation ${activationId} issued for ${branchName} / ${terminalCode}.`,
+        status: 'completed',
+        requesterId: actorStaffId,
+        requesterName: issuedBy,
+        targetId: activationId,
+        targetType: 'license',
+        currentStep: 3,
+        totalSteps: 3,
+      });
+
+      onAddWorkspaceAuditEvent({
+        workspaceId: 'licensing_centre',
+        actorStaffId,
+        actorName: issuedBy,
+        activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+        action: 'POS_LICENSE_ACTIVATE',
+        targetType: 'pos_activation',
+        targetId: activationId,
+        result: firestoreResult,
+        message: `Control Centre issued POS activation ${activationId} and license ${licenseId} for ${vendorName}. ${firestoreMessage}`,
+      });
+
+      onAddWorkspaceActivity({
+        workspaceId: 'licensing_centre',
+        type: 'license',
+        severity: firestoreResult === 'success' ? 'success' : 'warning',
+        title: 'POS License Activated',
+        message: `${vendorName} can now be read from sci_pos_activations as ${activationId}.`,
+        actorName: issuedBy,
+        targetPath: '/pos',
+      });
+
+      onAddWorkspaceNotification({
+        title: 'POS Activation Created',
+        message: `${vendorName} POS activation ${activationId} was issued by Control Centre.`,
+        type: 'license',
+        priority: firestoreResult === 'success' ? 'high' : 'critical',
+        targetPath: '/pos',
+        workspaceId: 'licensing_centre',
+      });
+
+      setSelectedLicenseId(licenseId);
+      setActivationNotice(`Activation ${activationId} saved to sci_pos_activations.`);
+      setIsActivationDrawerOpen(false);
+    } finally {
+      setIsActivatingLicense(false);
+    }
+  };
 
   const handleIssueLicense = (e: React.FormEvent) => {
     e.preventDefault();
@@ -675,22 +1047,19 @@ export default function POSLicensingView() {
                 <div className="flex items-center space-x-2">
                   <Terminal className="w-3.5 h-3.5" />
                   <span>Licensed Terminals Registry</span>
+                  <span className="border border-[#D1D1CF] bg-white px-1.5 py-0.5 text-[7px] text-gray-500">
+                    ACTIVATIONS {activationRecords.length}
+                  </span>
                 </div>
                 
                 <div className="flex gap-1.5">
                   <button
-                    onClick={() => {
-                      if (unlicensedVendors.length === 0) {
-                        alert('All vendors currently possess active or pending POS licenses.');
-                        return;
-                      }
-                      setIssueVendorId(unlicensedVendors[0].id);
-                      setIssuePlanId(plans[0]?.id || 'PLN-POS-STARTER');
-                      setIsIssueModalOpen(true);
-                    }}
-                    className="bg-white border border-[#1A1A1A] hover:bg-[#FF5A00] hover:text-white px-2 py-1 text-[8px] font-black uppercase tracking-wider cursor-pointer"
+                    type="button"
+                    onClick={openActivationDrawer}
+                    className="bg-[#FF5A00] text-white border border-[#FF5A00] hover:bg-[#1A1A1A] hover:border-[#1A1A1A] px-2 py-1 text-[8px] font-black uppercase tracking-wider cursor-pointer inline-flex items-center gap-1"
                   >
-                    Issue License
+                    <Key className="w-3 h-3" />
+                    Activate POS License
                   </button>
 
                   {selectedLicense && (
@@ -1020,6 +1389,215 @@ export default function POSLicensingView() {
 
           </div>
 
+        </div>
+      )}
+
+      {/* ACTIVATE POS LICENSE DRAWER */}
+      {isActivationDrawerOpen && (
+        <div className="fixed inset-0 z-50 bg-[#111111]/40 flex justify-end">
+          <form
+            onSubmit={handleActivatePOSLicense}
+            className="h-full w-full max-w-xl bg-white border-l-4 border-[#1A1A1A] shadow-2xl overflow-y-auto text-left font-mono text-[#1A1A1A]"
+          >
+            <div className="sticky top-0 z-10 bg-white border-b-2 border-[#1A1A1A]">
+              <div className="h-1.5 bg-[#FF5A00]" />
+              <div className="p-5 flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-[#FF5A00]">
+                    Control Centre Authority
+                  </div>
+                  <h3 className="font-sans font-black text-sm uppercase mt-1">
+                    Activate POS License
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsActivationDrawerOpen(false)}
+                  className="border-2 border-[#1A1A1A] w-8 h-8 inline-flex items-center justify-center hover:bg-[#1A1A1A] hover:text-white cursor-pointer"
+                  aria-label="Close activation drawer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-5 text-[9px] font-bold text-gray-500">
+              {activationNotice && (
+                <div className="border border-emerald-300 bg-emerald-50 text-emerald-800 p-3 font-black uppercase">
+                  {activationNotice}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="uppercase flex items-center gap-1">
+                  <Building className="w-3 h-3" />
+                  Select vendor
+                </label>
+                <select
+                  value={activationVendorId}
+                  onChange={(e) => handleActivationVendorChange(e.target.value)}
+                  className="w-full bg-white border-2 border-[#1A1A1A] p-2 focus:outline-none text-[10px] font-bold cursor-pointer uppercase"
+                >
+                  <option value={NEW_VENDOR_OPTION}>Create vendor from owner email</option>
+                  {vendors.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} ({v.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="uppercase flex items-center gap-1">
+                  <User className="w-3 h-3" />
+                  Owner Google Email
+                </label>
+                <input
+                  type="email"
+                  value={activationOwnerEmail}
+                  onChange={(e) => setActivationOwnerEmail(e.target.value)}
+                  className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 focus:outline-none focus:border-[#FF5A00] text-[10px] font-bold"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="uppercase flex items-center gap-1">
+                  <Layers className="w-3 h-3" />
+                  Select plan
+                </label>
+                <select
+                  value={activationPlanId}
+                  onChange={(e) => handleActivationPlanChange(e.target.value)}
+                  className="w-full bg-white border-2 border-[#1A1A1A] p-2 focus:outline-none text-[10px] font-bold cursor-pointer uppercase"
+                  required
+                >
+                  {posPlanOptions.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} - {p.interval} - ${p.price}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="uppercase">Branch name</label>
+                  <input
+                    type="text"
+                    value={activationBranchName}
+                    onChange={(e) => setActivationBranchName(e.target.value)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 focus:outline-none focus:border-[#FF5A00] text-[10px] font-bold"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="uppercase">Terminal name</label>
+                  <input
+                    type="text"
+                    value={activationTerminalName}
+                    onChange={(e) => setActivationTerminalName(e.target.value)}
+                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 focus:outline-none focus:border-[#FF5A00] text-[10px] font-bold"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="uppercase flex items-center gap-1">
+                  <Cpu className="w-3 h-3" />
+                  Terminal code
+                </label>
+                <input
+                  type="text"
+                  value={activationTerminalCode}
+                  onChange={(e) => setActivationTerminalCode(e.target.value.toUpperCase())}
+                  className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 focus:outline-none focus:border-[#FF5A00] text-[10px] font-bold uppercase tracking-wider"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="uppercase flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    Start date
+                  </label>
+                  <input
+                    type="date"
+                    value={activationStartDate}
+                    onChange={(e) => setActivationStartDate(e.target.value)}
+                    className="w-full bg-white border border-[#D1D1CF] p-2 focus:outline-none focus:border-[#FF5A00] text-[10px] font-bold"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="uppercase flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    Expiry date
+                  </label>
+                  <input
+                    type="date"
+                    value={activationExpiryDate}
+                    onChange={(e) => setActivationExpiryDate(e.target.value)}
+                    className="w-full bg-white border border-[#D1D1CF] p-2 focus:outline-none focus:border-[#FF5A00] text-[10px] font-bold"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="uppercase">License mode</label>
+                  <select
+                    value={activationLicenseMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as POSLicenseMode;
+                      setActivationLicenseMode(mode);
+                      setActivationStorageMode(mode === 'demo' ? 'localOnly' : 'cloud');
+                    }}
+                    className="w-full bg-white border-2 border-[#1A1A1A] p-2 focus:outline-none text-[10px] font-bold cursor-pointer uppercase"
+                  >
+                    <option value="demo">Demo</option>
+                    <option value="production">Production</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="uppercase">Storage mode</label>
+                  <select
+                    value={activationStorageMode}
+                    onChange={(e) => setActivationStorageMode(e.target.value as POSStorageMode)}
+                    className="w-full bg-white border-2 border-[#1A1A1A] p-2 focus:outline-none text-[10px] font-bold cursor-pointer uppercase"
+                  >
+                    <option value="localOnly">Local Only</option>
+                    <option value="cloud">Cloud</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 bg-white border-t-2 border-[#1A1A1A] p-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsActivationDrawerOpen(false)}
+                className="px-3 py-2 border-2 border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white text-[10px] font-black uppercase cursor-pointer inline-flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isActivatingLicense}
+                className="px-3 py-2 bg-[#FF5A00] text-white hover:bg-[#1A1A1A] disabled:opacity-60 disabled:cursor-wait text-[10px] font-black uppercase cursor-pointer inline-flex items-center gap-1"
+              >
+                <Check className="w-3 h-3" />
+                {isActivatingLicense ? 'Activating' : 'Activate'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

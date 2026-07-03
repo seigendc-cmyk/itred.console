@@ -11,6 +11,7 @@ import {
 import type {
   SCIPlatformPlan,
   SCIPOSLicense,
+  SCIPOSActivation,
   SCIAppLicense,
 } from "../../domain";
 
@@ -32,6 +33,7 @@ export interface SCILicenseEvent {
 export const LICENSING_COLLECTIONS = {
   platformPlans: "platform_plans",
   posLicenses: "pos_licenses",
+  posActivations: "pos_activations",
   appLicenses: "app_licenses",
   licenseEvents: "license_events",
 } as const;
@@ -87,6 +89,27 @@ export function createLicensingFirestoreRepository(db: Firestore) {
       upsertDocument(db, LICENSING_COLLECTIONS.posLicenses, license.licenseId, {
         ...license,
       } as unknown as Record<string, unknown>),
+
+    listPOSActivations: () =>
+      listCollection<SCIPOSActivation>(db, LICENSING_COLLECTIONS.posActivations),
+
+    listPOSActivationsByVendor: (vendorId: string) =>
+      listByField<SCIPOSActivation>(
+        db,
+        LICENSING_COLLECTIONS.posActivations,
+        "vendorId",
+        vendorId
+      ),
+
+    upsertPOSActivation: (activation: SCIPOSActivation) =>
+      upsertDocument(
+        db,
+        LICENSING_COLLECTIONS.posActivations,
+        activation.activationId,
+        {
+          ...activation,
+        } as unknown as Record<string, unknown>
+      ),
 
     listAppLicenses: () =>
       listCollection<SCIAppLicense>(db, LICENSING_COLLECTIONS.appLicenses),

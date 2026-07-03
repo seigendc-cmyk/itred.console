@@ -3,10 +3,13 @@ import type {
   POSActivationRecord,
 } from "../licensing/posActivationTypes";
 
-const STORAGE_KEY = "sci_pos_activation_records";
+const LEGACY_STORAGE_KEY = "sci_pos_activation_records";
+export const POS_ACTIVATIONS_STORAGE_KEY = "sci_pos_activations";
 
 export function getPOSActivationRecords(): POSActivationRecord[] {
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw =
+    localStorage.getItem(POS_ACTIVATIONS_STORAGE_KEY) ||
+    localStorage.getItem(LEGACY_STORAGE_KEY);
   if (!raw) return [];
 
   try {
@@ -17,14 +20,22 @@ export function getPOSActivationRecords(): POSActivationRecord[] {
 }
 
 export function savePOSActivationRecords(records: POSActivationRecord[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  localStorage.setItem(POS_ACTIVATIONS_STORAGE_KEY, JSON.stringify(records));
 }
 
-export function issueMockPOSActivation(input: {
+export function createPOSActivationRecord(input: {
+  activationId?: string;
+  licenseId?: string;
   vendorId: string;
   vendorName: string;
+  ownerEmail: string;
   planId: string;
   planName: string;
+  branchId: string;
+  branchName: string;
+  terminalId: string;
+  terminalCode: string;
+  status?: POSActivationRecord["status"];
   licenseMode: "demo" | "production";
   storageMode: "localOnly" | "cloud";
   maxBranches: number;
@@ -39,12 +50,18 @@ export function issueMockPOSActivation(input: {
   const now = new Date().toISOString();
 
   const record: POSActivationRecord = {
-    licenseId: `POS-LIC-${Date.now()}`,
+    activationId: input.activationId || `POS-ACT-${Date.now()}`,
+    licenseId: input.licenseId || `POS-LIC-${Date.now()}`,
     vendorId: input.vendorId,
     vendorName: input.vendorName,
+    ownerEmail: input.ownerEmail,
     planId: input.planId,
     planName: input.planName,
-    status: "active",
+    branchId: input.branchId,
+    branchName: input.branchName,
+    terminalId: input.terminalId,
+    terminalCode: input.terminalCode,
+    status: input.status || "active",
     licenseMode: input.licenseMode,
     storageMode: input.storageMode,
     maxBranches: input.maxBranches,
@@ -63,6 +80,32 @@ export function issueMockPOSActivation(input: {
   savePOSActivationRecords([record, ...records]);
 
   return record;
+}
+
+export function issueMockPOSActivation(input: {
+  vendorId: string;
+  vendorName: string;
+  planId: string;
+  planName: string;
+  licenseMode: "demo" | "production";
+  storageMode: "localOnly" | "cloud";
+  maxBranches: number;
+  maxTerminals: number;
+  maxStaff: number;
+  maxProducts: number;
+  startsAt: string;
+  expiresAt: string;
+  issuedBy: string;
+  notes?: string;
+}): POSActivationRecord {
+  return createPOSActivationRecord({
+    ...input,
+    ownerEmail: "demo@itred.local",
+    branchId: `BR-${Date.now()}`,
+    branchName: "Demo Branch",
+    terminalId: `TRM-${Date.now()}`,
+    terminalCode: "DEMO-TERM",
+  });
 }
 
 export function updatePOSActivationStatus(
@@ -172,5 +215,6 @@ export function validatePOSActivationForVendor(
 }
 
 export function resetPOSActivationBridge() {
-  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(POS_ACTIVATIONS_STORAGE_KEY);
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
 }

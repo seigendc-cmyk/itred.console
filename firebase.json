@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "console-itred-app",
+    "site": "itred-console-control",
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [

@@ -183,6 +183,31 @@ export interface SCIPOSLicense extends SCIBaseEntity {
   notes?: string;
 }
 
+export interface SCIPOSActivation extends SCIBaseEntity {
+  activationId: string;
+  licenseId: string;
+  vendorId: string;
+  vendorName: string;
+  ownerEmail: string;
+  planId: string;
+  planName: string;
+  branchId: string;
+  branchName: string;
+  terminalId: string;
+  terminalCode: string;
+  status: SCIEntityStatus;
+  licenseMode: SCILicenseMode;
+  storageMode: SCIStorageMode;
+  startsAt: string;
+  expiresAt: string;
+  maxBranches: number;
+  maxTerminals: number;
+  maxStaff: number;
+  maxProducts: number;
+  issuedBy: string;
+  issuedAt: string;
+}
+
 export interface SCIAppLicense extends SCIBaseEntity {
   appLicenseId: string;
   vendorId: string;

@@ -14,11 +14,17 @@ export type POSStorageMode =
   | "cloud";
 
 export interface POSActivationRecord {
+  activationId: string;
   licenseId: string;
   vendorId: string;
   vendorName: string;
+  ownerEmail: string;
   planId: string;
   planName: string;
+  branchId: string;
+  branchName: string;
+  terminalId: string;
+  terminalCode: string;
   status: POSLicenseStatus;
   licenseMode: POSLicenseMode;
   storageMode: POSStorageMode;
