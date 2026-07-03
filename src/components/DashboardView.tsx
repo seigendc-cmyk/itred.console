@@ -75,6 +75,7 @@ export default function DashboardView() {
   // Diagnostics check engine
   const diagnosticsResults = useMemo(() => runSCIDiagnostics(), []);
   const passedDiagnostics = diagnosticsResults.filter(r => r.passed).length;
+  const failedDiagnostics = diagnosticsResults.length - passedDiagnostics;
 
   // Environment Mode
   const envModeStr = localStorage.getItem('sci_environment_mode') || 'prototype';
