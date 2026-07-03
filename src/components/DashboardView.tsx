@@ -1,4 +1,7 @@
-import React from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useLifecycle } from '../App';
+import { useNavigate } from 'react-router-dom';
+import { runSCIDiagnostics } from '../diagnostics';
 import { 
   Users, 
   Key, 
@@ -9,332 +12,486 @@ import {
   Plus, 
   CheckCircle2, 
   ClipboardList, 
-  Grid 
+  Grid,
+  ShieldCheck,
+  TrendingUp,
+  MapPin,
+  Clock,
+  ArrowRight,
+  Database,
+  Bell,
+  Cpu,
+  Layers,
+  Settings,
+  AlertTriangle,
+  UserCheck,
+  AlertCircle
 } from 'lucide-react';
-import { AuditLog } from '../types';
 
-interface DashboardStats {
-  totalVendors: number;
-  pendingActivations: number;
-  activePOSLicenses: number;
-  revenueThisMonth: string;
-  rpnAgentsCount: number;
-  pendingVerifications: number;
+interface CommandQueueItem {
+  id: string;
+  type: 'vendor_approval' | 'awaiting_license' | 'license_expiring' | 'rpn_target' | 'finance_collection' | 'staff_alert' | 'diagnostics_warning';
+  title: string;
+  desc: string;
+  priority: 'High' | 'Medium' | 'Low';
+  workspacePath: string;
+  reviewed: boolean;
 }
 
-interface DashboardViewProps {
-  stats: DashboardStats;
-  recentLogs: AuditLog[];
-  onQuickAction: (actionId: 'create_vendor' | 'approve_vendor' | 'create_plan' | 'issue_pos' | 'activate_app') => void;
-  dashboardType?: string;
-}
+export default function DashboardView() {
+  const { 
+    vendors, 
+    setVendors, 
+    posLicenses, 
+    setPosLicenses, 
+    rpnAgents, 
+    activeStaffSession, 
+    workspaceAuditEvents, 
+    onAddWorkspaceAuditEvent,
+    workspaceNotifications, 
+    onMarkWorkspaceNotificationRead,
+    financeRecords,
+    workflows,
+    onAddWorkflow
+  } = useLifecycle();
 
-export default function DashboardView({ stats, recentLogs, onQuickAction, dashboardType = 'executive' }: DashboardViewProps) {
-  
-  const cards = [
-    {
-      id: 'stat_total_vendors',
-      title: 'Total Vendors',
-      value: stats.totalVendors,
-      subtext: 'Registered ecosystem merchants',
-      icon: Users,
-      color: 'border-l-4 border-l-[#1A1A1A]'
-    },
-    {
-      id: 'stat_pending_activations',
-      title: 'Pending Activations',
-      value: stats.pendingActivations,
-      subtext: 'Awaiting node key issuance',
-      icon: Key,
-      color: 'border-l-4 border-l-[#FF5A00]'
-    },
-    {
-      id: 'stat_active_pos',
-      title: 'Active POS Licenses',
-      value: stats.activePOSLicenses,
-      subtext: 'Operational merchant terminals',
-      icon: Terminal,
-      color: 'border-l-4 border-l-emerald-600'
-    },
-    {
-      id: 'stat_revenue',
-      title: 'Revenue This Month',
-      value: stats.revenueThisMonth,
-      subtext: 'Aggregated clearing fees',
-      icon: Coins,
-      color: 'border-l-4 border-l-amber-500'
-    },
-    {
-      id: 'stat_rpn_agents',
-      title: 'RPN Agents',
-      value: stats.rpnAgentsCount,
-      subtext: 'Relay Processing Nodes online',
-      icon: Activity,
-      color: 'border-l-4 border-l-blue-600'
-    },
-    {
-      id: 'stat_pending_verifications',
-      title: 'Pending Verifications',
-      value: stats.pendingVerifications,
-      subtext: 'Requires operational audit',
-      icon: ShieldAlert,
-      color: 'border-l-4 border-l-rose-600'
-    }
-  ];
+  const navigate = useNavigate();
 
-  // Dynamically filter cards based on active desk console dashboardType
-  const filteredCards = React.useMemo(() => {
-    if (dashboardType === 'sales') {
-      return cards.filter(c => c.id === 'stat_revenue' || c.id === 'stat_total_vendors' || c.id === 'stat_active_pos');
-    }
-    if (dashboardType === 'support') {
-      return cards.filter(c => c.id === 'stat_pending_activations' || c.id === 'stat_pending_verifications' || c.id === 'stat_rpn_agents');
-    }
-    if (dashboardType === 'operations') {
-      return cards.filter(c => c.id === 'stat_pending_activations' || c.id === 'stat_rpn_agents' || c.id === 'stat_pending_verifications');
-    }
-    return cards;
-  }, [dashboardType, stats]);
+  // Log dashboard open event
+  useEffect(() => {
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'home',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'DASHBOARD_OPEN',
+      targetType: 'dashboard',
+      targetId: 'executive_dashboard',
+      result: 'success',
+      message: 'Executive command dashboard opened.'
+    });
+  }, []);
+
+  // Diagnostics check engine
+  const diagnosticsResults = useMemo(() => runSCIDiagnostics(), []);
+  const passedDiagnostics = diagnosticsResults.filter(r => r.passed).length;
+
+  // Environment Mode
+  const envModeStr = localStorage.getItem('sci_environment_mode') || 'prototype';
+
+  // 1. Dynamic KPI values
+  const kpiData = useMemo(() => {
+    const totalVnd = vendors.length;
+    const activeVnd = vendors.filter(v => v.status === 'Active').length;
+    const pendingAct = vendors.filter(v => v.status === 'Pending Verification').length;
+    const activeLics = posLicenses.filter(l => l.status === 'Active').length;
+    const demoVnd = vendors.filter(v => v.assignedPlanId === 'VENDOR_DEMO').length;
+
+    // Monthly revenue MRR
+    const activePaidVendors = vendors.filter(v => v.status === 'Active');
+    const plansCost = activePaidVendors.reduce((acc, curr) => {
+      if (curr.assignedPlanId === 'PLN-POS-STARTER') return acc + 49;
+      if (curr.assignedPlanId === 'PLN-POS-GROWTH') return acc + 99;
+      if (curr.assignedPlanId === 'PLN-POS-PRO') return acc + 199;
+      if (curr.assignedPlanId === 'PLN-POS-BUSPLUS') return acc + 299;
+      if (curr.assignedPlanId === 'PLN-ENT-COMMERCE') return acc + 899;
+      return acc;
+    }, 0);
+    const mrr = plansCost + 1500; // adding seed module/capacity revenue
+
+    const rpnCount = rpnAgents.length;
+    
+    // Expiring licenses in 30 days
+    const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const expiringLics = posLicenses.filter(l => {
+      const exp = new Date(l.expiryDate);
+      return l.status === 'Active' && exp > new Date() && exp <= thirtyDaysFromNow;
+    }).length;
+
+    // Overdue renewals amount
+    const overdueRenewals = financeRecords
+      ? financeRecords
+          .filter(r => r.paymentStatus === 'Overdue')
+          .reduce((acc, curr) => acc + curr.amount, 0)
+      : 249;
+
+    const unreadNotifications = workspaceNotifications.filter(n => !n.read).length;
+
+    return { totalVnd, activeVnd, pendingAct, activeLics, demoVnd, mrr, rpnCount, expiringLics, overdueRenewals, unreadNotifications };
+  }, [vendors, posLicenses, rpnAgents, financeRecords, workspaceNotifications]);
+
+  // 2. Command queue items state (with hide/complete actions)
+  const [commandQueue, setCommandQueue] = useState<CommandQueueItem[]>(() => {
+    return [
+      { id: 'Q-001', type: 'vendor_approval', title: 'Pending Vendor Approval', desc: 'AtomiCo QuickShop is awaiting license credentials approval.', priority: 'High', workspacePath: '/vendors', reviewed: false },
+      { id: 'Q-002', type: 'awaiting_license', title: 'Vendor Awaiting License', desc: 'KronoMart Hardware is active but has no bound licenses.', priority: 'High', workspacePath: '/pos', reviewed: false },
+      { id: 'Q-003', type: 'license_expiring', title: 'POS License Expiring', desc: 'License POS-LIC-3310 will expire within 7 days.', priority: 'Medium', workspacePath: '/pos', reviewed: false },
+      { id: 'Q-004', type: 'rpn_target', title: 'RPN Target Behind', desc: 'Virginia-Delta Agent is at 40% target fulfillment for Q3.', priority: 'Medium', workspacePath: '/rpn', reviewed: false },
+      { id: 'Q-005', type: 'finance_collection', title: 'Finance Collections Due', desc: 'Vendor Vanguard Outpost has outstanding overdue billing balance.', priority: 'High', workspacePath: '/finance', reviewed: false },
+      { id: 'Q-006', type: 'staff_alert', title: 'Staff Access Flagged', desc: 'Operator switched desk access with pending notifications queue.', priority: 'Low', workspacePath: '/staff', reviewed: false },
+      { id: 'Q-007', type: 'diagnostics_warning', title: 'Diagnostics Checks Failed', desc: 'Capacity enforcement suite reported 1 unresolved alert.', priority: 'Medium', workspacePath: '/diagnostics', reviewed: false }
+    ];
+  });
+
+  const handleMarkQueueReviewed = (id: string) => {
+    setCommandQueue(prev => prev.map(item => item.id === id ? { ...item, reviewed: true } : item));
+    
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'home',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'QUEUE_ITEM_REVIEW',
+      targetType: 'queue',
+      targetId: id,
+      result: 'success',
+      message: `Marked command queue item ${id} as reviewed.`
+    });
+  };
+
+  const handleCreateWorkflow = (item: CommandQueueItem) => {
+    onAddWorkflow({
+      workflowType: 'vendor_activation',
+      title: `Queue Action: ${item.title}`,
+      description: item.desc,
+      status: 'pending',
+      requesterId: activeStaffSession?.staffId || 'system',
+      requesterName: activeStaffSession?.fullName || 'System Operator',
+      targetId: item.id,
+      targetType: 'queue_item',
+      currentStep: 1,
+      totalSteps: 3
+    });
+    alert(`Workflow created successfully for prioritized item: ${item.title}`);
+  };
+
+  // 3. Operating System Health states
+  const osHealthPanels = useMemo(() => {
+    return [
+      { id: 'vendor_ops', name: 'Vendor Operations', status: 'Operational', tasks: vendors.filter(v => v.status === 'Pending Verification').length, alerts: 0, path: '/vendors' },
+      { id: 'licensing', name: 'Licensing Centre', status: 'Operational', tasks: posLicenses.filter(l => l.status === 'Pending').length, alerts: kpiData.expiringLics, path: '/plans' },
+      { id: 'commercial', name: 'Commercial Desk', status: 'Operational', tasks: 0, alerts: 0, path: '/capacity' },
+      { id: 'internal_admin', name: 'Internal Admin', status: 'Operational', tasks: 0, alerts: 0, path: '/staff' },
+      { id: 'rpn_ops', name: 'RPN Operations', status: 'Operational', tasks: 0, alerts: 0, path: '/rpn' },
+      { id: 'finance', name: 'Finance Control', status: 'Degraded', tasks: 2, alerts: financeRecords ? financeRecords.filter(r => r.paymentStatus === 'Overdue').length : 1, path: '/finance' },
+      { id: 'platform', name: 'Platform Core', status: 'Operational', tasks: 0, alerts: failedDiagnostics, path: '/diagnostics' }
+    ];
+  }, [vendors, posLicenses, kpiData, financeRecords, failedDiagnostics]);
+
+  // 4. Growth Funnel values
+  const funnelData = useMemo(() => {
+    const prospect = vendors.filter(v => v.status === 'Prospect' || v.status === 'Contacted').length || 2;
+    const demo = vendors.filter(v => v.assignedPlanId === 'VENDOR_DEMO').length;
+    const request = vendors.filter(v => v.status === 'Pending Verification').length;
+    const approved = vendors.filter(v => v.status === 'Approved').length;
+    const licensed = vendors.filter(v => !!v.licenseKey).length;
+    const active = vendors.filter(v => v.status === 'Active').length;
+
+    return { prospect, demo, request, approved, licensed, active };
+  }, [vendors]);
+
+  // 5. Activity Feed
+  const recentActivities = useMemo(() => {
+    return workspaceAuditEvents.slice(0, 15);
+  }, [workspaceAuditEvents]);
+
+  // Shortcut triggers
+  const handleShortcutClick = (path: string) => {
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'home',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'WORKSPACE_SHORTCUT_CLICK',
+      targetType: 'shortcut',
+      targetId: path,
+      result: 'success',
+      message: `Clicked workspace shortcut to ${path}.`
+    });
+    navigate(path);
+  };
 
   return (
-    <div id="dashboard_view" className="space-y-8">
-      {/* View Header */}
-      <div id="dashboard_header" className="flex justify-between items-center border-b border-[#D1D1CF] pb-4">
-        <div>
-          <h1 className="text-xl font-bold font-sans text-[#1A1A1A] uppercase tracking-wider">
-            iTred Control Dashboard — {dashboardType} console
-          </h1>
-          <p className="text-xs text-gray-400 font-mono mt-0.5">ECOSYSTEM OPERATIONS METRICS PORTAL — COMPRESSED SCHEMA</p>
+    <div className="space-y-6 font-mono text-left text-[#1A1A1A]">
+      
+      {/* 1. EXECUTIVE COMMAND KPI GRID */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-[#1A1A1A]" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Total Vendors</span>
+          <span className="text-xl font-sans font-black block mt-1">{kpiData.totalVnd}</span>
         </div>
-        <div className="flex items-center space-x-2 text-xs font-mono bg-[#F4F4F1] border border-[#D1D1CF] px-3 py-1.5 text-[#1A1A1A]">
-          <span className="w-2.5 h-2.5 bg-green-500 inline-block mr-1"></span>
-          <span>NODE CLUSTER: PRIMARY ONLINE</span>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-green-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Active Vendors</span>
+          <span className="text-xl font-sans font-black block mt-1 text-emerald-800">{kpiData.activeVnd}</span>
         </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-[#FF5A00]" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Pending Activations</span>
+          <span className="text-xl font-sans font-black block mt-1 text-[#FF5A00]">{kpiData.pendingAct}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Active POS Licenses</span>
+          <span className="text-xl font-sans font-black block mt-1">{kpiData.activeLics}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-orange-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Demo Vendors</span>
+          <span className="text-xl font-sans font-black block mt-1">{kpiData.demoVnd}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Monthly Revenue</span>
+          <span className="text-xl font-sans font-black block mt-1">$${kpiData.mrr.toLocaleString()}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-purple-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">RPN Agents</span>
+          <span className="text-xl font-sans font-black block mt-1">{kpiData.rpnCount}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-stone-700" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Staff Sessions</span>
+          <span className="text-xl font-sans font-black block mt-1">{activeStaffSession ? 1 : 0}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Diagnostics Status</span>
+          <span className="text-xl font-sans font-black block mt-1">
+            {passedDiagnostics} / {diagnosticsResults.length}
+          </span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-red-400" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Expiring Licenses</span>
+          <span className="text-xl font-sans font-black block mt-1 text-red-500">{kpiData.expiringLics}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-yellow-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">Overdue Renewals</span>
+          <span className="text-xl font-sans font-black block mt-1 text-red-650">$${kpiData.overdueRenewals}</span>
+        </div>
+
+        <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
+          <span className="text-[8px] text-gray-400 block font-black uppercase">System Alerts</span>
+          <span className="text-xl font-sans font-black block mt-1 text-red-650">{kpiData.unreadNotifications}</span>
+        </div>
+
       </div>
 
-      {/* Stats Cards Grid */}
-      <div id="dashboard_stats_grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <div
-              id={card.id}
-              key={card.title}
-              className={`bg-white border border-[#D1D1CF] p-6 flex flex-col justify-between relative shadow-sm rounded-none transition-all hover:translate-y-[-2px] ${card.color}`}
-            >
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
-                    {card.title}
-                  </span>
-                  <span className="text-3xl font-bold font-mono text-[#1A1A1A] block tracking-tight">
-                    {card.value}
-                  </span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Left Side: Health Panels & funnel */}
+        <div className="lg:col-span-2 space-y-6">
+          
+          {/* 2. OPERATING SYSTEM HEALTH */}
+          <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-4 shadow-sm">
+            <div className="border-b border-[#D1D1CF] pb-2 text-[#FF5A00] font-black uppercase text-[10px]">
+              <span>Operating System Workspace Health</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {osHealthPanels.map(panel => {
+                let badge = 'bg-green-50 text-emerald-800 border-green-200';
+                if (panel.status === 'Degraded') badge = 'bg-yellow-50 text-yellow-800 border-yellow-200';
+
+                return (
+                  <div key={panel.id} className="bg-stone-50 border border-stone-250 p-3 flex flex-col justify-between space-y-3 rounded-none text-[9px] font-bold text-gray-600">
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-start">
+                        <span className="text-gray-900 font-sans block">{panel.name}</span>
+                        <span className={`border px-1 py-0.2 text-[7px] font-black uppercase ${badge}`}>{panel.status}</span>
+                      </div>
+                      <div className="text-gray-400 text-[8px] uppercase">Open Tasks: {panel.tasks} • Alerts: {panel.alerts}</div>
+                    </div>
+                    
+                    <button
+                      type="button"
+                      onClick={() => handleShortcutClick(panel.path)}
+                      className="w-full py-1 bg-white border border-[#1A1A1A] hover:bg-[#FF5A00] hover:text-white hover:border-transparent text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all"
+                    >
+                      Open Workspace &rarr;
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3. TODAY'S COMMAND QUEUE */}
+          <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-3 shadow-sm">
+            <div className="border-b border-[#D1D1CF] pb-2 text-[#FF5A00] font-black uppercase text-[10px]">
+              <span>Today's Command Queue Checklist</span>
+            </div>
+
+            <div className="space-y-2.5">
+              {commandQueue.filter(q => !q.reviewed).map(item => (
+                <div key={item.id} className="bg-stone-50 border border-stone-200 p-3 flex justify-between items-center rounded-none text-[8.5px] font-bold text-gray-650">
+                  <div className="space-y-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-gray-950 font-sans">{item.title}</span>
+                      <span className={`px-1.5 border text-[7px] font-black uppercase ${
+                        item.priority === 'High' ? 'border-red-300 text-red-650 bg-red-50' : 'border-stone-300 text-stone-500 bg-stone-50'
+                      }`}>
+                        {item.priority}
+                      </span>
+                    </div>
+                    <p className="text-[8.5px] text-gray-500 font-sans leading-normal normal-case font-medium">{item.desc}</p>
+                  </div>
+
+                  <div className="flex gap-1.5 text-[8px] font-black uppercase font-mono">
+                    <button onClick={() => handleMarkQueueReviewed(item.id)} className="bg-white border border-stone-300 px-2 py-1 hover:border-[#1A1A1A] cursor-pointer">Reviewed</button>
+                    <button onClick={() => handleCreateWorkflow(item)} className="bg-white border border-stone-300 px-2 py-1 hover:border-[#1A1A1A] cursor-pointer">Workflow</button>
+                    <button onClick={() => handleShortcutClick(item.workspacePath)} className="bg-[#FF5A00] text-white px-2 py-1 cursor-pointer">Open</button>
+                  </div>
                 </div>
-                <div className="p-2 border border-gray-100 bg-[#F4F4F1]">
-                  <Icon className="w-5 h-5 text-gray-600" />
-                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+
+        {/* Right Side: snap shots & funnel & feed */}
+        <div className="space-y-6">
+          
+          {/* 5. VENDOR GROWTH FUNNEL */}
+          <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-3 shadow-sm text-center">
+            <div className="border-b border-[#D1D1CF] pb-2 text-[#FF5A00] font-black uppercase text-[10px] text-left">
+              <span>Vendor Growth Funnel Metrics</span>
+            </div>
+
+            <div className="space-y-1 text-[9px] font-bold uppercase text-gray-500">
+              <div className="bg-[#FAF9F6] border border-stone-250 p-2 text-center">
+                <span>Prospect Lead ({funnelData.prospect} vendors)</span>
               </div>
+              <div className="text-xs text-[#FF5A00] font-sans font-black">&darr;</div>
               
-              <div className="mt-4 flex items-center justify-between">
-                <span className="text-xs text-gray-500 font-sans block">
-                  {card.subtext}
-                </span>
-                {card.title === 'Pending Activations' && stats.pendingActivations > 0 && (
-                  <span className="text-[10px] font-mono text-[#FF5A00] font-bold">Action Needed</span>
-                )}
+              <div className="bg-[#FAF9F6] border border-stone-250 p-2 text-center">
+                <span>Demo Environment ({funnelData.demo} vendors)</span>
               </div>
+              <div className="text-xs text-[#FF5A00] font-sans font-black">&darr;</div>
 
-              {/* Technical corner decor */}
-              <div className="absolute bottom-1 right-1 w-1.5 h-1.5 bg-[#1A1A1A]/10" />
-            </div>
-          );
-        })}
-      </div>
+              <div className="bg-[#FAF9F6] border border-stone-250 p-2 text-center">
+                <span>Activation Requested ({funnelData.request} vendors)</span>
+              </div>
+              <div className="text-xs text-[#FF5A00] font-sans font-black">&darr;</div>
 
-      {/* Quick Action Panel */}
-      <div id="dashboard_quick_actions" className="border border-[#D1D1CF] bg-white p-6 relative">
-        {/* Accent corner tag */}
-        <div className="absolute top-0 left-0 bg-[#1A1A1A] text-white text-[9px] font-mono px-3 py-0.5 uppercase tracking-wider">
-          PRIMARY SYSTEM CONTROL PANEL
-        </div>
-        
-        <div className="mt-2 space-y-4">
-          <div className="flex items-center space-x-2">
-            <h2 className="text-xs font-bold font-sans text-gray-500 uppercase tracking-widest">
-              Standard Operations
-            </h2>
-          </div>
-          
-          {/* Action buttons list */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            
-            <button
-              id="action_create_vendor"
-              onClick={() => onQuickAction('create_vendor')}
-              className="flex flex-col justify-between p-4 bg-[#F4F4F1] border border-transparent hover:border-[#FF5A00] hover:bg-[#FF5A00]/5 text-[#1A1A1A] hover:text-[#FF5A00] transition-all text-left group font-mono h-24 rounded-none cursor-pointer"
-            >
-              <div className="flex justify-between items-center w-full">
-                <Users className="w-4 h-4 text-gray-500 group-hover:text-[#FF5A00]" />
-                <Plus className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#FF5A00]" />
+              <div className="bg-[#FAF9F6] border border-stone-250 p-2 text-center">
+                <span>Verification Approved ({funnelData.approved} vendors)</span>
               </div>
-              <div>
-                <div className="text-[9px] text-gray-400 uppercase">MERCHANT SETUP</div>
-                <div className="text-xs font-bold uppercase tracking-wider">Create Vendor</div>
-              </div>
-            </button>
+              <div className="text-xs text-[#FF5A00] font-sans font-black">&darr;</div>
 
-            <button
-              id="action_approve_vendor"
-              onClick={() => onQuickAction('approve_vendor')}
-              className="flex flex-col justify-between p-4 bg-[#F4F4F1] border border-transparent hover:border-[#FF5A00] hover:bg-[#FF5A00]/5 text-[#1A1A1A] hover:text-[#FF5A00] transition-all text-left group font-mono h-24 rounded-none cursor-pointer"
-            >
-              <div className="flex justify-between items-center w-full">
-                <CheckCircle2 className="w-4 h-4 text-gray-500 group-hover:text-[#FF5A00]" />
-                <Plus className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#FF5A00]" />
+              <div className="bg-[#FAF9F6] border border-stone-250 p-2 text-center">
+                <span>POS License Issued ({funnelData.licensed} vendors)</span>
               </div>
-              <div>
-                <div className="text-[9px] text-gray-400 uppercase">SECURITY PROTOCOL</div>
-                <div className="text-xs font-bold uppercase tracking-wider">Approve Vendor</div>
-              </div>
-            </button>
+              <div className="text-xs text-[#FF5A00] font-sans font-black">&darr;</div>
 
-            <button
-              id="action_create_plan"
-              onClick={() => onQuickAction('create_plan')}
-              className="flex flex-col justify-between p-4 bg-[#F4F4F1] border border-transparent hover:border-[#FF5A00] hover:bg-[#FF5A00]/5 text-[#1A1A1A] hover:text-[#FF5A00] transition-all text-left group font-mono h-24 rounded-none cursor-pointer"
-            >
-              <div className="flex justify-between items-center w-full">
-                <Grid className="w-4 h-4 text-gray-500 group-hover:text-[#FF5A00]" />
-                <Plus className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#FF5A00]" />
+              <div className="bg-orange-50 border border-orange-250 text-[#FF5A00] p-2 text-center">
+                <span>Active Vendor ({funnelData.active} vendors)</span>
               </div>
-              <div>
-                <div className="text-[9px] text-gray-400 uppercase">SUBSCRIPTION MODEL</div>
-                <div className="text-xs font-bold uppercase tracking-wider">Create Plan</div>
-              </div>
-            </button>
-
-            <button
-              id="action_issue_pos"
-              onClick={() => onQuickAction('issue_pos')}
-              className="flex flex-col justify-between p-4 bg-[#F4F4F1] border border-transparent hover:border-[#FF5A00] hover:bg-[#FF5A00]/5 text-[#1A1A1A] hover:text-[#FF5A00] transition-all text-left group font-mono h-24 rounded-none cursor-pointer"
-            >
-              <div className="flex justify-between items-center w-full">
-                <Terminal className="w-4 h-4 text-gray-500 group-hover:text-[#FF5A00]" />
-                <Plus className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#FF5A00]" />
-              </div>
-              <div>
-                <div className="text-[9px] text-gray-400 uppercase">NODE TERMINAL</div>
-                <div className="text-xs font-bold uppercase tracking-wider">Issue POS License</div>
-              </div>
-            </button>
-
-            <button
-              id="action_activate_app"
-              onClick={() => onQuickAction('activate_app')}
-              className="flex flex-col justify-between p-4 bg-[#F4F4F1] border border-transparent hover:border-[#FF5A00] hover:bg-[#FF5A00]/5 text-[#1A1A1A] hover:text-[#FF5A00] transition-all text-left group font-mono h-24 rounded-none cursor-pointer"
-            >
-              <div className="flex justify-between items-center w-full">
-                <Key className="w-4 h-4 text-gray-500 group-hover:text-[#FF5A00]" />
-                <Plus className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#FF5A00]" />
-              </div>
-              <div>
-                <div className="text-[9px] text-gray-400 uppercase">INTEGRATION ACCESS</div>
-                <div className="text-xs font-bold uppercase tracking-wider">Activate App</div>
-              </div>
-            </button>
-
-          </div>
-        </div>
-      </div>
-
-      {/* Secondary Dashboard Content: Recent Audit Stream & System Outline */}
-      <div id="dashboard_secondary_panels" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Recent Audits Panel */}
-        <div id="dashboard_recent_audits" className="lg:col-span-2 bg-white border border-[#D1D1CF] p-5 space-y-4">
-          <div className="flex justify-between items-center border-b border-[#F4F4F1] pb-2">
-            <h3 className="text-xs font-bold font-mono text-[#1A1A1A] uppercase tracking-wider flex items-center">
-              <ClipboardList className="w-4 h-4 text-[#FF5A00] mr-1.5" />
-              LIVE SYSTEM AUDIT TELEMETRY STREAM
-            </h3>
-            <span className="text-[9px] bg-emerald-100 text-emerald-800 font-mono px-1.5 py-0.5">SECURE</span>
-          </div>
-          
-          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-            {recentLogs.slice(0, 5).map((log) => (
-              <div
-                key={log.id}
-                className="flex items-center justify-between p-2.5 border border-[#D1D1CF] bg-[#F4F4F1] text-xs font-mono hover:bg-[#EAEAE8] transition-all"
-              >
-                <div className="flex items-center space-x-3 truncate">
-                  <span className="text-[10px] text-gray-400 shrink-0">
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </span>
-                  <span className="bg-gray-200 text-[#1A1A1A] font-bold px-1 text-[9px] shrink-0 uppercase">
-                    {log.actor}
-                  </span>
-                  <span className="text-[#1A1A1A] truncate max-w-[200px] uppercase font-semibold">
-                    {log.action}
-                  </span>
-                  <span className="text-gray-400 hidden sm:inline truncate">
-                    → {log.target}
-                  </span>
-                </div>
-                <span className={`text-[9px] px-1 font-bold shrink-0 uppercase ${
-                  log.status === 'Success' ? 'bg-green-100 text-green-800' :
-                  log.status === 'Warning' ? 'bg-yellow-100 text-yellow-800' :
-                  'bg-red-100 text-red-800'
-                }`}>
-                  {log.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Environmental Metadata Info */}
-        <div id="dashboard_env_panel" className="bg-[#1A1A1A] border border-[#2A2A2A] p-5 text-white font-mono space-y-4 relative overflow-hidden">
-          {/* Faint industrial background markings */}
-          <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none select-none">
-            <Terminal className="w-48 h-48 stroke-[4px]" />
-          </div>
-          
-          <div className="border-b border-[#2A2A2A] pb-2">
-            <h3 className="text-xs font-bold text-white uppercase tracking-widest">
-              SYSTEM HOST PARAMETERS
-            </h3>
-          </div>
-
-          <div className="space-y-3 text-[11px] text-gray-400 relative z-10">
-            <div className="flex justify-between border-b border-gray-800 pb-1">
-              <span>SYSTEM SHELL:</span>
-              <span className="text-[#FF5A00] font-semibold">iTred Control v4.1</span>
-            </div>
-            <div className="flex justify-between border-b border-gray-800 pb-1">
-              <span>ACTIVE DAEMON:</span>
-              <span className="text-white">seiGEN CORE v4.14</span>
-            </div>
-            <div className="flex justify-between border-b border-gray-800 pb-1">
-              <span>GATEWAY BOUND:</span>
-              <span className="text-white">10.84.112.5:3000</span>
-            </div>
-            <div className="flex justify-between border-b border-gray-800 pb-1">
-              <span>ENCRYPTION TYPE:</span>
-              <span className="text-[#FF5A00]">RSA-4096-ECC</span>
-            </div>
-            <div className="flex justify-between border-b border-gray-800 pb-1">
-              <span>SYS SECURITY:</span>
-              <span className="text-green-500 font-bold">STABLE LOCK</span>
             </div>
           </div>
-          
-          <div className="p-2 border border-dashed border-gray-700 bg-[#151618] text-[9px] text-center text-gray-400">
-            ALL NODE OPERATIONS SUBJECT TO COMPLIANCE PROTOCOL S-801
+
+          {/* 10. EXECUTIVE ACTIVITY FEED */}
+          <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-4 shadow-sm">
+            <div className="border-b border-[#D1D1CF] pb-2 text-[#FF5A00] font-black uppercase text-[10px]">
+              <span>Executive Cross-Workspace Activity Feed</span>
+            </div>
+
+            <div className="relative border-l border-[#D1D1CF] pl-4 ml-2 space-y-4 text-left font-sans">
+              {recentActivities.length === 0 ? (
+                <div className="text-[9px] text-gray-400 italic uppercase font-mono font-bold">No compliance audit logs logged.</div>
+              ) : (
+                recentActivities.map(e => (
+                  <div key={e.auditId} className="relative">
+                    <div className="absolute -left-6 top-1.5 w-3 h-3 rounded-full border-2 bg-white border-[#FF5A00] flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 bg-[#FF5A00] rounded-full" />
+                    </div>
+                    <div className="text-[9px]">
+                      <div className="font-mono font-black uppercase tracking-wider text-gray-800 flex justify-between">
+                        <span>{e.action}</span>
+                        <span className="text-[7.5px] text-gray-400 font-normal">[{new Date(e.createdAt).toLocaleTimeString()}]</span>
+                      </div>
+                      <div className="text-gray-500 font-medium text-[8px] leading-relaxed mt-0.5 font-sans normal-case">{e.message}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
+
         </div>
 
       </div>
+
+      {/* 4. REVENUE SNAPSHOT GRAPHS */}
+      <div className="bg-white border-2 border-[#1A1A1A] p-4 text-left space-y-4 shadow-sm">
+        <div className="border-b border-[#D1D1CF] pb-2 text-[#FF5A00] font-black uppercase text-[10px]">
+          <span>Ecosystem Revenue & Licensing Snapshot</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          {/* MRR Trend */}
+          <div className="bg-stone-50 border border-stone-250 p-4 space-y-2">
+            <span className="text-[8px] text-gray-400 font-black uppercase">MRR growth trend</span>
+            <div className="h-28 flex items-end justify-between border-b border-stone-200 pb-1">
+              <div className="w-6 bg-orange-500 h-8" />
+              <div className="w-6 bg-orange-500 h-14" />
+              <div className="w-6 bg-orange-500 h-20" />
+              <div className="w-6 bg-[#FF5A00] h-24" />
+            </div>
+            <span className="text-[7.5px] text-gray-400 font-bold block mt-1 uppercase">Target MRR run-rate projection.</span>
+          </div>
+
+          {/* Plan slabs */}
+          <div className="bg-stone-50 border border-stone-250 p-4 space-y-2">
+            <span className="text-[8px] text-gray-400 font-black uppercase">Plan slabs distribution</span>
+            <div className="flex h-28 items-center justify-around font-mono text-[9px] uppercase font-bold text-gray-500">
+              <div className="space-y-1.5 text-[8px]">
+                <div className="flex items-center space-x-1.5"><div className="w-2 h-2 bg-orange-500" /><span>Starter POS: 52%</span></div>
+                <div className="flex items-center space-x-1.5"><div className="w-2 h-2 bg-emerald-600" /><span>Growth POS: 28%</span></div>
+                <div className="flex items-center space-x-1.5"><div className="w-2 h-2 bg-indigo-600" /><span>Enterprise: 20%</span></div>
+              </div>
+            </div>
+          </div>
+
+          {/* System Environment */}
+          <div className="bg-stone-50 border border-stone-250 p-4 space-y-2 text-[9px] font-bold text-gray-500 uppercase">
+            <span className="text-[8px] text-gray-400 font-black uppercase block">System platform parameters</span>
+            <div className="space-y-1.5 pt-2">
+              <div className="flex justify-between">
+                <span>Active Mode:</span>
+                <span className="text-gray-900">{envModeStr.toUpperCase()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Firebase blueprint:</span>
+                <span className="text-[#FF5A00]">SCHEMA OK</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Diagnostics runs:</span>
+                <span className="text-emerald-800">HEALTHY</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
     </div>
   );
 }
