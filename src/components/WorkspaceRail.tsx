@@ -15,16 +15,14 @@ export default function WorkspaceRail({
   activeStaffSession 
 }: WorkspaceRailProps) {
   
-  // Resolve access status for all workspaces
-  const workspaceAccessMap = React.useMemo(() => {
-    const map: Record<string, boolean> = {};
-    SCI_WORKSPACES.forEach((ws) => {
-      map[ws.workspaceId] = resolveWorkspaceAccess({
+  // Resolve allowed workspaces list
+  const allowedWorkspaces = React.useMemo(() => {
+    return SCI_WORKSPACES.filter((ws) => {
+      return resolveWorkspaceAccess({
         workspace: ws,
         session: activeStaffSession
       }).allowed;
     });
-    return map;
   }, [activeStaffSession]);
 
   return (
@@ -39,9 +37,8 @@ export default function WorkspaceRail({
 
       {/* Workspace triggers */}
       <div className="flex-1 w-full space-y-2 flex flex-col items-center">
-        {SCI_WORKSPACES.map((ws) => {
+        {allowedWorkspaces.map((ws) => {
           const isActive = activeWorkspaceId === ws.workspaceId;
-          const isAllowed = workspaceAccessMap[ws.workspaceId];
           return (
             <button
               id={`workspace_rail_btn_${ws.workspaceId}`}
@@ -52,17 +49,10 @@ export default function WorkspaceRail({
                   ? 'bg-[#FF5A00] border-transparent text-white font-black' 
                   : 'bg-[#222222] border-transparent text-[#8E9299] hover:text-white hover:bg-[#333333]'
               }`}
-              title={`${ws.label} - ${ws.description}${!isAllowed ? ' (Clearance Required)' : ''}`}
+              title={`${ws.label} - ${ws.description}`}
             >
               {/* Workspace Badge name */}
               <span className="text-[9px] uppercase font-black tracking-widest leading-none">{ws.iconLabel}</span>
-              
-              {/* Lock Indicator for Restricted Workspaces */}
-              {!isAllowed && (
-                <span className="absolute top-1 right-1 text-[7px] text-[#FF5A00] font-black leading-none select-none">
-                  🔒
-                </span>
-              )}
               
               {/* Active Indicator bar */}
               {isActive && (

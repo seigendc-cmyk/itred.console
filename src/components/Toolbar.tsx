@@ -63,6 +63,13 @@ export default function Toolbar({
     return staffDesks.filter(d => activeStaff.assignedDeskIds.includes(d.deskId));
   }, [staffDesks, activeStaff]);
 
+  // Resolve roleName from staffRoles
+  const resolvedRoleName = React.useMemo(() => {
+    if (!activeStaffSession) return 'guest';
+    const roleObj = staffRoles.find(r => r.roleId === activeStaffSession.roleId);
+    return roleObj ? roleObj.roleName : activeStaffSession.roleId.replace('role_', '');
+  }, [staffRoles, activeStaffSession]);
+
   return (
     <header id="toolbar_header" className="h-16 border-b border-[#D1D1CF] bg-white flex items-center justify-between px-8 relative z-10 shrink-0 font-sans select-none">
       
@@ -182,7 +189,7 @@ export default function Toolbar({
             className="flex items-center space-x-2 px-3 py-1.5 border border-[#D1D1CF] bg-[#F4F4F1] text-xs font-sans text-[#1A1A1A] hover:border-[#FF5A00] transition-colors rounded-none font-bold"
           >
             <span className="uppercase tracking-wider font-mono">{activeStaffSession?.fullName || 'Anonymous'}</span>
-            <span className="text-[9px] bg-gray-200 text-gray-700 px-1 font-mono font-semibold uppercase">{activeStaffSession?.roleId.replace('role_', '') || 'guest'}</span>
+            <span className="text-[9px] bg-gray-200 text-gray-700 px-1.5 py-0.5 font-mono font-semibold uppercase">{resolvedRoleName}</span>
             
             {activeStaffSession?.dashboardType && (
               <span className="text-[9px] bg-orange-100 text-[#FF5A00] px-1 font-mono font-extrabold uppercase shrink-0">
@@ -205,7 +212,7 @@ export default function Toolbar({
                 </div>
                 <div className="flex justify-between">
                   <span>Role Clearance:</span>
-                  <span className="text-[#FF5A00]">{activeStaffSession?.roleId}</span>
+                  <span className="text-[#FF5A00]">{resolvedRoleName}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Desk Terminal:</span>

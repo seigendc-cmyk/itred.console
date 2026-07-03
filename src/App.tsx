@@ -104,11 +104,13 @@ import {
   getSCIEnvironmentState,
   getWorkspaceNotifications,
   markWorkspaceNotificationRead,
+  addWorkspaceNotification,
   SCIWorkspaceNotification,
   getWorkspaceAuditEvents,
   addWorkspaceAuditEvent,
   SCIWorkspaceAuditEvent,
   getWorkspaceActivities,
+  addWorkspaceActivity,
   SCIWorkspaceActivity,
   SCIWorkspaceSearchItem,
   clearWorkspaceAuditEvents
@@ -294,13 +296,25 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
   const [integrations, setIntegrations] = useState<IntegrationService[]>(INITIAL_INTEGRATIONS);
 
   const [internalStaff, setInternalStaff] = useState<SCIInternalStaff[]>(() => {
-    return getInternalStaff(INITIAL_INTERNAL_STAFF);
+    const loaded = getInternalStaff(INITIAL_INTERNAL_STAFF);
+    if (loaded.length === 1 && INITIAL_INTERNAL_STAFF.length > 1) {
+      return INITIAL_INTERNAL_STAFF;
+    }
+    return loaded;
   });
   const [staffRoles, setStaffRoles] = useState<SCIStaffRole[]>(() => {
-    return getStaffRoles(INITIAL_STAFF_ROLES);
+    const loaded = getStaffRoles(INITIAL_STAFF_ROLES);
+    if (loaded.length < INITIAL_STAFF_ROLES.length) {
+      return INITIAL_STAFF_ROLES;
+    }
+    return loaded;
   });
   const [staffDesks, setStaffDesks] = useState<SCIStaffDesk[]>(() => {
-    return getStaffDesks(INITIAL_STAFF_DESKS);
+    const loaded = getStaffDesks(INITIAL_STAFF_DESKS);
+    if (loaded.length === 2 && INITIAL_STAFF_DESKS.length > 2) {
+      return INITIAL_STAFF_DESKS;
+    }
+    return loaded;
   });
   const [internalMenuFeatures, setInternalMenuFeatures] = useState<SCIMenuFeature[]>(() => {
     return getMenuFeatures(INITIAL_MENU_FEATURES);
@@ -469,6 +483,16 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
   const handleUpdateWorkflow = (id: string, updates: Partial<SCIWorkflow>) => {
     updateWorkflow(id, updates);
     setWorkflows(getWorkflows());
+  };
+
+  const handleAddWorkspaceNotification = (notif: Omit<SCIWorkspaceNotification, "notificationId" | "createdAt" | "read">) => {
+    addWorkspaceNotification(notif);
+    setWorkspaceNotifications(getWorkspaceNotifications());
+  };
+
+  const handleAddWorkspaceActivity = (activity: Omit<SCIWorkspaceActivity, "activityId" | "createdAt">) => {
+    addWorkspaceActivity(activity);
+    setWorkspaceActivities(getWorkspaceActivities());
   };
 
   // Subview specific state
@@ -1170,11 +1194,13 @@ function LifecycleProvider({ children }: { children: React.ReactNode }) {
     onChangeEnvMode: handleSetEnvMode,
     workspaceNotifications,
     onMarkWorkspaceNotificationRead: handleMarkWorkspaceNotificationRead,
+    onAddWorkspaceNotification: handleAddWorkspaceNotification,
     workspaceAuditEvents,
     onAddWorkspaceAuditEvent: handleAddWorkspaceAuditEvent,
     onClearWorkspaceAuditEvents: handleClearWorkspaceAuditEvents,
     workspaceActivities,
     setWorkspaceActivities,
+    onAddWorkspaceActivity: handleAddWorkspaceActivity,
     workflows,
     onAddWorkflow: handleAddWorkflow,
     onUpdateWorkflow: handleUpdateWorkflow
@@ -1548,45 +1574,45 @@ function RequireAuthLayout() {
                 <div className="absolute top-0 left-0 right-0 h-2 bg-[#FF5A00]" />
                 
                 {/* Title and Badge */}
-                <div className="flex items-center space-x-3 text-[#FF5A00] border-b border-gray-200 pb-3">
-                  <ShieldAlert className="w-8 h-8 shrink-0" />
+                <div className="flex items-center space-x-3 text-[#FF5A00] border-b-2 border-[#1A1A1A] pb-4">
+                  <ShieldAlert className="w-9 h-9 shrink-0 text-[#FF5A00]" />
                   <div>
-                    <h2 className="text-sm font-black uppercase tracking-widest font-sans text-[#1A1A1A]">
+                    <h2 className="text-base font-black uppercase tracking-widest font-sans text-[#1A1A1A]">
                       {accessRestrictedVM?.title || 'Access Restricted'}
                     </h2>
-                    <span className="text-[8px] bg-red-150 text-red-750 px-1.5 uppercase font-bold">
+                    <span className="text-[9px] bg-red-650 text-white px-2 py-0.5 uppercase font-black tracking-wider">
                       Clearance Blocked
                     </span>
                   </div>
                 </div>
 
                 {/* Denial Explanation */}
-                <div className="space-y-1">
-                  <div className="text-[9px] text-gray-400 uppercase font-black">REASON FOR DENIAL</div>
-                  <p className="text-xs text-red-650 font-bold leading-relaxed font-sans">
+                <div className="space-y-1 bg-red-50/50 p-4 border border-red-200">
+                  <div className="text-[9px] text-red-500 uppercase font-black">REASON FOR DENIAL</div>
+                  <p className="text-xs text-red-750 font-bold leading-relaxed font-sans">
                     {currentWorkspaceAccess.message || accessRestrictedVM?.message}
                   </p>
                 </div>
 
                 {/* Profiles & Terminal status */}
-                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-3 border border-gray-150 text-[9px] uppercase font-bold text-gray-600">
+                <div className="grid grid-cols-2 gap-4 bg-[#FAF9F6] p-4 border-2 border-[#1A1A1A] text-[9px] uppercase font-bold text-gray-600">
                   <div>
-                    <span>Active Operator Profile:</span>
-                    <div className="text-gray-800 font-black">{activeStaffSession?.fullName}</div>
+                    <span className="text-gray-400 block text-[8px] font-black">Active Operator Profile:</span>
+                    <div className="text-[#1A1A1A] font-black text-xs font-sans mt-0.5">{activeStaffSession?.fullName}</div>
                   </div>
                   <div>
-                    <span>Active Terminal Desk:</span>
-                    <div className="text-gray-800 font-black">{accessRestrictedVM?.activeDesk}</div>
+                    <span className="text-gray-400 block text-[8px] font-black">Active Terminal Desk:</span>
+                    <div className="text-[#1A1A1A] font-black text-xs font-sans mt-0.5">{accessRestrictedVM?.activeDesk}</div>
                   </div>
                 </div>
 
                 {/* Clearance Specifications Compare */}
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-2 gap-6 bg-stone-50 p-4 border border-[#D1D1CF]">
                   <div className="space-y-2">
-                    <div className="text-[9px] text-gray-400 uppercase font-bold border-b border-gray-150 pb-0.5">Required Clearances</div>
+                    <div className="text-[9px] text-[#1A1A1A] uppercase font-black border-b border-[#D1D1CF] pb-1.5">Required Clearances</div>
                     <div className="flex flex-wrap gap-1">
                       {accessRestrictedVM?.requiredFeatureIds?.map(f => (
-                        <span key={f} className="bg-stone-200 text-stone-850 px-1.5 py-0.5 text-[8px] font-mono select-all">
+                        <span key={f} className="bg-stone-200 text-stone-850 px-1.5 py-0.5 text-[8px] font-mono select-all font-bold">
                           {f}
                         </span>
                       )) || <span className="text-gray-400 italic">None</span>}
@@ -1594,10 +1620,10 @@ function RequireAuthLayout() {
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-[9px] text-gray-400 uppercase font-bold border-b border-gray-150 pb-0.5">Granted Clearances</div>
+                    <div className="text-[9px] text-[#1A1A1A] uppercase font-black border-b border-[#D1D1CF] pb-1.5">Granted Clearances</div>
                     <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                       {accessRestrictedVM?.grantedFeatureIds?.map(f => (
-                        <span key={f} className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[8px] font-mono select-all border border-emerald-150">
+                        <span key={f} className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[8px] font-mono select-all border border-emerald-150 font-bold">
                           {f}
                         </span>
                       )) || <span className="text-gray-400 italic">None</span>}
@@ -1606,20 +1632,20 @@ function RequireAuthLayout() {
                 </div>
 
                 {/* Desk Switcher Actions footer */}
-                <div className="pt-4 border-t border-[#D1D1CF] flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div className="pt-4 border-t-2 border-[#1A1A1A] flex flex-col sm:flex-row justify-between items-center gap-4">
                   <button
                     onClick={() => navigate('/dashboard')}
-                    className="px-4 py-2 border-2 border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white transition-all text-[10px] font-black uppercase tracking-wider rounded-none cursor-pointer font-sans"
+                    className="px-4 py-2 bg-white border-2 border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white transition-all text-[10px] font-black uppercase tracking-wider rounded-none cursor-pointer font-sans"
                   >
                     Return to Dashboard
                   </button>
 
                   <div className="flex items-center space-x-2">
-                    <span className="text-[9px] text-gray-400 font-bold uppercase font-sans">Quick Switch Desk:</span>
+                    <span className="text-[9px] text-gray-500 font-black uppercase font-sans">Quick Switch Desk:</span>
                     <select
                       value={activeStaffSession?.activeDeskId}
                       onChange={(e) => handleDeskSwitch(e.target.value)}
-                      className="bg-white border-2 border-[#1A1A1A] text-xs font-bold focus:outline-none uppercase px-3 py-1 font-sans cursor-pointer"
+                      className="bg-white border-2 border-[#1A1A1A] text-[10px] font-black focus:outline-none uppercase px-3 py-1.5 font-sans cursor-pointer rounded-none"
                     >
                       {staffDesks
                         .filter(d => {

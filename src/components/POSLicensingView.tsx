@@ -1,17 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useLifecycle } from '../App';
-import { POSLicense, Vendor, Plan, RPNAgent } from '../types';
-import { 
-  issueMockPOSActivation, 
-  getPOSActivationRecords, 
-  updatePOSActivationStatus, 
-  validatePOSActivationForVendor 
-} from '../services/posActivationBridge';
-import { POSActivationRecord } from '../licensing/posActivationTypes';
+import { POSLicense, Vendor, Plan } from '../types';
 import { 
   Terminal, 
   Plus, 
-  RefreshCw, 
   Key, 
   Ban, 
   FileText, 
@@ -27,19 +19,12 @@ import {
   Sparkles,
   Info,
   Sliders,
-  Tag,
-  Database,
-  Link,
-  Link2,
+  Copy,
   Cpu,
   Layers,
-  Copy,
-  DollarSign,
-  ArrowRight,
-  TrendingUp,
   Activity,
-  Globe,
-  Network
+  User,
+  AlertCircle
 } from 'lucide-react';
 
 export default function POSLicensingView() {
@@ -48,1627 +33,891 @@ export default function POSLicensingView() {
     setPosLicenses, 
     vendors, 
     setVendors,
-    plans, 
-    currentAdmin, 
-    addLogAndNotify,
-    auditLogs,
-    rpnAgents,
-    setRpnAgents,
-    setFinanceRecords
+    plans,
+    envMode,
+    onChangeEnvMode,
+    activeStaffSession,
+    onAddWorkspaceAuditEvent,
+    onAddWorkspaceActivity,
+    onAddWorkspaceNotification,
+    workspaceAuditEvents,
+    workflows,
+    onAddWorkflow,
+    onUpdateWorkflow
   } = useLifecycle();
 
-  // Active Tab: 'licenses' | 'activation-bridge' | 'generator' | 'matrix' | 'rpn-linker'
-  const [activeTab, setActiveTab] = useState<'licenses' | 'activation-bridge' | 'generator' | 'matrix' | 'rpn-linker'>('licenses');
+  // Active view tab: 'manager' (License Manager + Validation) or 'demo-licensing' (Demo Licensing)
+  const [activeTab, setActiveTab] = useState<'manager' | 'demo-licensing'>('manager');
 
-  // ==========================================================================
-  // TAB 1: TERMINAL LICENSES MAIN STATE & HANDLERS
-  // ==========================================================================
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [selectedLicense, setSelectedLicense] = useState<POSLicense | null>(null);
-
-  const [formVendorId, setFormVendorId] = useState('');
-  const [formPlanId, setFormPlanId] = useState('');
-  const [formStartDate, setFormStartDate] = useState('2026-07-01');
-  const [formExpiryDate, setFormExpiryDate] = useState('2027-07-01');
-  const [formNotes, setFormNotes] = useState('');
-
-  // POS Activation Bridge States
-  const [activationRecords, setActivationRecords] = useState<POSActivationRecord[]>(() => getPOSActivationRecords());
-  const [isActivationDrawerOpen, setIsActivationDrawerOpen] = useState(false);
-  const [actVendorId, setActVendorId] = useState('');
-  const [actPlanId, setActPlanId] = useState('');
-  const [actLicenseMode, setActLicenseMode] = useState<'demo' | 'production'>('production');
-  const [actStorageMode, setActStorageMode] = useState<'localOnly' | 'cloud'>('cloud');
-  const [actStartDate, setActStartDate] = useState('2026-07-02');
-  const [actExpiryDate, setActExpiryDate] = useState('2027-07-02');
-  const [actMaxBranches, setActMaxBranches] = useState('1');
-  const [actMaxTerminals, setActMaxTerminals] = useState('1');
-  const [actMaxStaff, setActMaxStaff] = useState('3');
-  const [actMaxProducts, setActMaxProducts] = useState('500');
-  const [actNotes, setActNotes] = useState('');
-  
-  const [validateVendorId, setValidateVendorId] = useState('');
-  const [validationResult, setValidationResult] = useState<any | null>(null);
-
-  // Synchronize Storage Mode with License Mode automatically
-  useEffect(() => {
-    if (actLicenseMode === 'demo') {
-      setActStorageMode('localOnly');
-    } else {
-      setActStorageMode('cloud');
-    }
-  }, [actLicenseMode]);
-
-  // Synchronize Capacity Limits with Plan automatically
-  useEffect(() => {
-    const plan = plans.find(p => p.id === actPlanId);
-    if (!plan) return;
-    setActMaxBranches(plan.maxBranches || '1');
-    setActMaxTerminals(plan.maxTerminals || '1');
-    setActMaxStaff(plan.maxStaff || '3');
-    setActMaxProducts(plan.maxProducts || '500');
-  }, [actPlanId, plans]);
-
+  // Search & Selector State
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [filterStatus, setFilterStatus] = useState('all');
 
-  const handleOpenDrawer = () => {
-    const activeVendors = vendors.filter((v: Vendor) => v.status === 'Active');
-    if (activeVendors.length > 0) {
-      setFormVendorId(activeVendors[0].id);
-    } else if (vendors.length > 0) {
-      setFormVendorId(vendors[0].id);
-    } else {
-      setFormVendorId('');
-    }
+  // Selected records
+  const [selectedLicenseId, setSelectedLicenseId] = useState<string>(() => {
+    return posLicenses[0]?.id || '';
+  });
 
-    const posPlans = plans.filter((p: Plan) => p.type === 'POS' || p.type === 'Hybrid');
-    if (posPlans.length > 0) {
-      setFormPlanId(posPlans[0].id);
-    } else if (plans.length > 0) {
-      setFormPlanId(plans[0].id);
-    } else {
-      setFormPlanId('');
-    }
+  const selectedLicense = useMemo(() => {
+    return posLicenses.find(l => l.id === selectedLicenseId) || null;
+  }, [posLicenses, selectedLicenseId]);
 
-    setFormStartDate('2026-07-01');
-    setFormExpiryDate('2027-07-01');
-    setFormNotes('');
-    setIsDrawerOpen(true);
-  };
+  // Validation state
+  const [selectedValidationVendorId, setSelectedValidationVendorId] = useState<string>('');
 
-  const handleActivationSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const vendor = vendors.find((v: Vendor) => v.id === actVendorId);
-    const plan = plans.find((p: Plan) => p.id === actPlanId);
+  // Validation output computed properties
+  const validationResult = useMemo(() => {
+    if (!selectedValidationVendorId) return null;
+    const vendor = vendors.find(v => v.id === selectedValidationVendorId);
+    if (!vendor) return null;
 
-    if (!vendor) {
-      alert("Please select a vendor.");
-      return;
-    }
-    if (!plan) {
-      alert("Please select a plan.");
-      return;
-    }
-
-    const finalStorageMode = actLicenseMode === 'demo' ? 'localOnly' : 'cloud';
-
-    const parseLimit = (val: string) => {
-      if (val === 'Unlimited' || val === 'unlimited') return 9999;
-      return parseInt(val) || 1;
-    };
-
-    const newRecord = issueMockPOSActivation({
-      vendorId: vendor.id,
-      vendorName: vendor.name,
-      planId: plan.id,
-      planName: plan.name,
-      licenseMode: actLicenseMode,
-      storageMode: finalStorageMode,
-      maxBranches: parseLimit(actMaxBranches),
-      maxTerminals: parseLimit(actMaxTerminals),
-      maxStaff: parseLimit(actMaxStaff),
-      maxProducts: parseLimit(actMaxProducts),
-      startsAt: actStartDate,
-      expiresAt: actExpiryDate,
-      issuedBy: currentAdmin?.name || 'Admin',
-      notes: actNotes
-    });
-
-    setActivationRecords(getPOSActivationRecords());
-    setIsActivationDrawerOpen(false);
-
-    if (addLogAndNotify) {
-      addLogAndNotify(
-        currentAdmin?.name || 'Admin',
-        'ISSUE_POS_ACTIVATION',
-        `${vendor.name} • ${newRecord.licenseId}`,
-        'success',
-        'success',
-        'POS Activation Issued',
-        `Registered activation bridge reference ${newRecord.licenseId} for ${vendor.name}.`
-      );
-    }
-  };
-
-  const handleValidateAccess = () => {
-    if (!validateVendorId) {
-      alert("Please choose a vendor to validate.");
-      return;
-    }
-    const decision = validatePOSActivationForVendor(validateVendorId);
-    setValidationResult(decision);
-  };
-
-  const handleIssueSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const vendor = vendors.find((v: Vendor) => v.id === formVendorId);
-    const plan = plans.find((p: Plan) => p.id === formPlanId);
-
-    if (!vendor) {
-      alert('Error: Please select a valid merchant vendor.');
-      return;
-    }
-    if (!plan) {
-      alert('Error: Please select a valid licensing plan.');
-      return;
-    }
-
-    const randId = `POS-LIC-${Math.floor(1000 + Math.random() * 9000)}`;
-    const vendorAbbr = vendor.name.substring(0, 3).toUpperCase().replace(/\s/g, 'X');
-    const randTerminalId = `TRM-${vendorAbbr}-${Math.floor(100 + Math.random() * 900)}`;
+    const license = posLicenses.find(l => l.vendorName === vendor.name);
     
-    const genPart = () => Math.floor(16**4 + Math.random()*(16**5 - 16**4)).toString(16).toUpperCase().substring(0, 4);
-    const randLicenseKey = `ITRD-POS-${genPart()}-${genPart()}-${genPart()}`;
+    if (!license) {
+      return {
+        allowed: false,
+        reasonCode: 'MISSING_LICENSE',
+        message: 'No Point-of-Sale licensing key has been issued for this vendor record.',
+        licenseId: '—',
+        plan: vendor.assignedPlanName || 'None',
+        expiry: '—',
+        mode: envMode,
+        storage: vendor.storageMode || 'localOnly'
+      };
+    }
+
+    if (license.status === 'Suspended') {
+      return {
+        allowed: false,
+        reasonCode: 'LICENSE_SUSPENDED',
+        message: 'Licensing console keys have been temporarily suspended by operator.',
+        licenseId: license.id,
+        plan: license.planName,
+        expiry: license.expiryDate,
+        mode: envMode,
+        storage: vendor.storageMode || 'localOnly'
+      };
+    }
+
+    if (license.status === 'Expired' || new Date(license.expiryDate) < new Date()) {
+      return {
+        allowed: false,
+        reasonCode: 'LICENSE_EXPIRED',
+        message: 'Licensing key term has expired. Renew subscription plan immediately.',
+        licenseId: license.id,
+        plan: license.planName,
+        expiry: license.expiryDate,
+        mode: envMode,
+        storage: vendor.storageMode || 'localOnly'
+      };
+    }
+
+    return {
+      allowed: true,
+      reasonCode: 'VAL_SUCCESS',
+      message: 'Cryptographic activation signature verified successfully.',
+      licenseId: license.id,
+      plan: license.planName,
+      expiry: license.expiryDate,
+      mode: envMode,
+      storage: vendor.storageMode || 'localOnly'
+    };
+  }, [selectedValidationVendorId, vendors, posLicenses, envMode]);
+
+  // Licensing Events Timeline computed from audit logs
+  const licenseEvents = useMemo(() => {
+    const actions = [
+      'POS_LICENSE_ISSUE', 
+      'POS_LICENSE_RENEW', 
+      'POS_LICENSE_SUSPEND', 
+      'POS_LICENSE_REVOKE', 
+      'POS_LICENSE_EXPIRE',
+      'VENDOR_DEMO_START',
+      'VENDOR_DEMO_CONVERSION'
+    ];
+    return workspaceAuditEvents
+      .filter(e => actions.includes(e.action))
+      .slice(0, 10);
+  }, [workspaceAuditEvents]);
+
+  // Demo records filtering
+  const demoVendorsList = useMemo(() => {
+    return vendors.filter(v => v.assignedPlanId === 'VENDOR_DEMO');
+  }, [vendors]);
+
+  const demoLicensesList = useMemo(() => {
+    return posLicenses.filter(l => l.planName === 'Vendor Demo');
+  }, [posLicenses]);
+
+  // Form States - Issue License
+  const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
+  const [issueVendorId, setIssueVendorId] = useState('');
+  const [issuePlanId, setIssuePlanId] = useState('');
+
+  // Operations Handlers
+
+  const handleIssueLicense = (e: React.FormEvent) => {
+    e.preventDefault();
+    const vendor = vendors.find(v => v.id === issueVendorId);
+    const plan = plans.find(p => p.id === issuePlanId);
+
+    if (!vendor || !plan) return alert('Please select a valid vendor and plan pricing.');
+
+    const key = `ITRD-POS-${Math.floor(1000 + Math.random() * 9000).toString(16).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000).toString(16).toUpperCase()}-LIC`;
+    const newId = `POS-LIC-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const newLicense: POSLicense = {
-      id: randId,
+      id: newId,
       vendorName: vendor.name,
-      terminalId: randTerminalId,
-      licenseKey: randLicenseKey,
+      terminalId: `TRM-VND-${Math.floor(100 + Math.random() * 900)}`,
+      licenseKey: key,
       status: 'Active',
-      issuedAt: formStartDate,
+      issuedAt: new Date().toISOString().split('T')[0],
       planName: plan.name,
-      expiryDate: formExpiryDate,
-      notes: formNotes.trim() || 'Provisioned via Enterprise License Manager console.',
-      billingCycle: 'Yearly',
-      tokenPrice: plan.price * 12,
-      collectionTag: 'Standard Licenses'
+      expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      notes: 'Issued from POS Licensing Command Centre',
+      billingCycle: plan.interval === 'Annual' ? 'Yearly' : 'Monthly',
+      tokenPrice: plan.price,
+      collectionTag: 'Standard Terminal'
     };
 
-    setPosLicenses((prev: POSLicense[]) => [newLicense, ...prev]);
-    setIsDrawerOpen(false);
+    // Update vendor key
+    const updatedVendors = vendors.map(v => v.id === vendor.id ? { ...v, licenseKey: key } : v);
+    setVendors(updatedVendors);
+    localStorage.setItem('sgn_vendors', JSON.stringify(updatedVendors));
 
-    if (addLogAndNotify) {
-      addLogAndNotify(
-        currentAdmin?.name || 'Admin',
-        'ISSUE_POS_LICENSE',
-        `${vendor.name} • ${randTerminalId}`,
-        'Success',
-        'success',
-        'POS Terminal License Issued',
-        `Terminal ${randTerminalId} associated with "${plan.name}" successfully binded cryptographic key ${randLicenseKey}.`
-      );
-    }
+    // Save License
+    const updatedLicenses = [newLicense, ...posLicenses];
+    setPosLicenses(updatedLicenses);
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify(updatedLicenses));
+
+    // Add compliance workflow event
+    onAddWorkflow({
+      workflowType: 'pos_license',
+      title: `License: ${vendor.name}`,
+      description: 'POS License key issued and registered.',
+      status: 'completed',
+      requesterId: activeStaffSession?.staffId || 'system',
+      requesterName: activeStaffSession?.fullName || 'System Operator',
+      targetId: newId,
+      targetType: 'license',
+      currentStep: 3,
+      totalSteps: 3
+    });
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'POS_LICENSE_ISSUE',
+      targetType: 'license',
+      targetId: newId,
+      result: 'success',
+      message: `Issued POS cryptographic license key for vendor ${vendor.name}.`
+    });
+
+    onAddWorkspaceActivity({
+      workspaceId: 'licensing_centre',
+      type: 'license',
+      severity: 'success',
+      title: 'POS License Issued',
+      message: `POS License key ${newId} generated for ${vendor.name}.`,
+      actorName: activeStaffSession?.fullName || 'System'
+    });
+
+    onAddWorkspaceNotification({
+      title: 'POS License Issued',
+      message: `New terminal license key issued for ${vendor.name}.`,
+      type: 'license',
+      priority: 'high',
+      targetPath: '/pos',
+      workspaceId: 'licensing_centre'
+    });
+
+    setSelectedLicenseId(newId);
+    setIsIssueModalOpen(false);
   };
 
-  const handleRenew = (lic: POSLicense) => {
-    let baseDate = lic.expiryDate ? new Date(lic.expiryDate) : new Date('2026-07-01');
-    if (isNaN(baseDate.getTime())) {
-      baseDate = new Date('2026-07-01');
-    }
-    baseDate.setFullYear(baseDate.getFullYear() + 1);
-    const nextExpiry = baseDate.toISOString().split('T')[0];
+  const handleRenewLicense = () => {
+    if (!selectedLicense) return;
 
-    setPosLicenses((prev: POSLicense[]) => 
-      prev.map(p => p.id === lic.id ? { 
-        ...p, 
-        status: 'Active',
-        expiryDate: nextExpiry,
-        notes: `${p.notes || ''}\n[Renewed on 2026-07-01 by ${currentAdmin?.name || 'Admin'}]`
-      } : p)
-    );
+    // Extend 1 year
+    const parts = selectedLicense.expiryDate.split('-');
+    const newYear = parseInt(parts[0]) + 1;
+    const nextExpiry = `${newYear}-${parts[1]}-${parts[2]}`;
 
-    if (addLogAndNotify) {
-      addLogAndNotify(
-        currentAdmin?.name || 'Admin',
-        'RENEW_POS_LICENSE',
-        `${lic.vendorName} • ${lic.terminalId}`,
-        'Success',
-        'success',
-        'POS License Renewed',
-        `Access credentials for Terminal ${lic.terminalId} extended to ${nextExpiry} under active clearance.`
-      );
-    }
+    const updated = posLicenses.map(l => l.id === selectedLicense.id ? { ...l, expiryDate: nextExpiry, status: 'Active' as const } : l);
+    setPosLicenses(updated);
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify(updated));
+
+    // Log Workflow
+    onAddWorkflow({
+      workflowType: 'pos_license',
+      title: `Renewal: ${selectedLicense.vendorName}`,
+      description: 'POS License extended for another billing year.',
+      status: 'completed',
+      requesterId: activeStaffSession?.staffId || 'system',
+      requesterName: activeStaffSession?.fullName || 'System Operator',
+      targetId: selectedLicense.id,
+      targetType: 'license',
+      currentStep: 3,
+      totalSteps: 3
+    });
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'POS_LICENSE_RENEW',
+      targetType: 'license',
+      targetId: selectedLicense.id,
+      result: 'success',
+      message: `Renewed POS license key term until ${nextExpiry} for vendor ${selectedLicense.vendorName}.`
+    });
+
+    onAddWorkspaceActivity({
+      workspaceId: 'licensing_centre',
+      type: 'license',
+      severity: 'success',
+      title: 'POS License Renewed',
+      message: `POS License key ${selectedLicense.id} extended to ${nextExpiry}.`,
+      actorName: activeStaffSession?.fullName || 'System'
+    });
+
+    alert('POS License successfully renewed.');
   };
 
-  const handleSuspend = (lic: POSLicense) => {
-    setPosLicenses((prev: POSLicense[]) => 
-      prev.map(p => p.id === lic.id ? { 
-        ...p, 
-        status: 'Suspended',
-        notes: `${p.notes || ''}\n[Suspended on 2026-07-01 by ${currentAdmin?.name || 'Admin'}]`
-      } : p)
-    );
+  const handleSuspendLicense = () => {
+    if (!selectedLicense) return;
 
-    if (addLogAndNotify) {
-      addLogAndNotify(
-        currentAdmin?.name || 'Admin',
-        'SUSPEND_POS_LICENSE',
-        `${lic.vendorName} • ${lic.terminalId}`,
-        'Warning',
-        'warning',
-        'POS License Suspended',
-        `Hardware TPM clearance has been suspended for terminal key on device ${lic.terminalId}.`
-      );
+    const updated = posLicenses.map(l => l.id === selectedLicense.id ? { ...l, status: 'Suspended' as const } : l);
+    setPosLicenses(updated);
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify(updated));
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'POS_LICENSE_SUSPEND',
+      targetType: 'license',
+      targetId: selectedLicense.id,
+      result: 'success',
+      message: `Suspended operations clearance for POS license ${selectedLicense.id}.`
+    });
+
+    onAddWorkspaceActivity({
+      workspaceId: 'licensing_centre',
+      type: 'license',
+      severity: 'warning',
+      title: 'POS License Suspended',
+      message: `POS License ${selectedLicense.id} has been suspended.`,
+      actorName: activeStaffSession?.fullName || 'System'
+    });
+
+    onAddWorkspaceNotification({
+      title: 'License Suspended',
+      message: `License key ${selectedLicense.id} was suspended by security operators.`,
+      type: 'security',
+      priority: 'high',
+      targetPath: '/pos',
+      workspaceId: 'licensing_centre'
+    });
+
+    alert('POS License suspended.');
+  };
+
+  const handleRevokeLicense = () => {
+    if (!selectedLicense) return;
+
+    const updated = posLicenses.map(l => l.id === selectedLicense.id ? { ...l, status: 'Revoked' as const } : l);
+    setPosLicenses(updated);
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify(updated));
+
+    // Remove key from vendor
+    const vendor = vendors.find(v => v.name === selectedLicense.vendorName);
+    if (vendor) {
+      const updatedVendors = vendors.map(v => v.id === vendor.id ? { ...v, licenseKey: undefined } : v);
+      setVendors(updatedVendors);
+      localStorage.setItem('sgn_vendors', JSON.stringify(updatedVendors));
     }
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'POS_LICENSE_REVOKE',
+      targetType: 'license',
+      targetId: selectedLicense.id,
+      result: 'success',
+      message: `Revoked POS license key authorization ${selectedLicense.id} for vendor ${selectedLicense.vendorName}.`
+    });
+
+    alert('POS License revoked.');
   };
 
-  const handleDeactivate = (lic: POSLicense) => {
-    setPosLicenses((prev: POSLicense[]) => 
-      prev.map(p => p.id === lic.id ? { 
-        ...p, 
-        status: 'Deactivated',
-        notes: `${p.notes || ''}\n[Deactivated on 2026-07-01 by ${currentAdmin?.name || 'Admin'}]`
-      } : p)
-    );
+  const handleExpireLicense = () => {
+    if (!selectedLicense) return;
 
-    if (addLogAndNotify) {
-      addLogAndNotify(
-        currentAdmin?.name || 'Admin',
-        'DEACTIVATE_POS_LICENSE',
-        `${lic.vendorName} • ${lic.terminalId}`,
-        'Warning',
-        'alert',
-        'POS License Deactivated',
-        `Terminal gateway link permanently broken and rotational keys purged for device ${lic.terminalId}.`
-      );
+    const updated = posLicenses.map(l => l.id === selectedLicense.id ? { ...l, status: 'Expired' as const } : l);
+    setPosLicenses(updated);
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify(updated));
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'POS_LICENSE_EXPIRE',
+      targetType: 'license',
+      targetId: selectedLicense.id,
+      result: 'success',
+      message: `Set POS license status to Expired for key ${selectedLicense.id}.`
+    });
+
+    onAddWorkspaceNotification({
+      title: 'License Expired',
+      message: `License key ${selectedLicense.id} has expired.`,
+      type: 'license',
+      priority: 'normal',
+      targetPath: '/pos',
+      workspaceId: 'licensing_centre'
+    });
+
+    alert('POS License set to Expired.');
+  };
+
+  const handleStartDemo = () => {
+    // 1. Set environment mode to prototype/local_demo
+    onChangeEnvMode('prototype');
+
+    // 2. Create demo vendor
+    const demoId = `V-DEMO-${Math.floor(100 + Math.random() * 900)}`;
+    const newVendor: Vendor = {
+      id: demoId,
+      name: `Demo Outpost ${Math.floor(10 + Math.random() * 90)}`,
+      tradingName: 'Demo Store Enclave',
+      category: 'Grocery & Hypermarket',
+      email: 'demo@itred.local',
+      phone: '000-000-0000',
+      country: 'United States',
+      city: 'Local Dev Node',
+      address: 'Simulated Address',
+      joinedDate: new Date().toISOString().split('T')[0],
+      status: 'Active',
+      assignedPlanId: 'VENDOR_DEMO',
+      assignedPlanName: 'Vendor Demo'
+    };
+
+    // 3. Issue demo license (localOnly)
+    const key = `DEMO-POS-KEY-${Math.floor(1000 + Math.random() * 9000).toString(16).toUpperCase()}-LOCAL`;
+    const licId = `DEMO-LIC-${Math.floor(1000 + Math.random() * 9000)}`;
+    
+    newVendor.licenseKey = key;
+
+    const newLicense: POSLicense = {
+      id: licId,
+      vendorName: newVendor.name,
+      terminalId: 'TRM-DEMO-LOCAL',
+      licenseKey: key,
+      status: 'Active',
+      issuedAt: new Date().toISOString().split('T')[0],
+      planName: 'Vendor Demo',
+      expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days
+      notes: 'Demo key (LOCAL ONLY / sandbox sandbox)',
+      billingCycle: 'Monthly',
+      tokenPrice: 0,
+      collectionTag: 'Local Sandbox'
+    };
+
+    setVendors([newVendor, ...vendors]);
+    setPosLicenses([newLicense, ...posLicenses]);
+
+    localStorage.setItem('sgn_vendors', JSON.stringify([newVendor, ...vendors]));
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify([newLicense, ...posLicenses]));
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'VENDOR_DEMO_START',
+      targetType: 'demo',
+      targetId: demoId,
+      result: 'success',
+      message: `Started sandbox demo store session: ${newVendor.name}.`
+    });
+
+    onAddWorkspaceActivity({
+      workspaceId: 'licensing_centre',
+      type: 'license',
+      severity: 'info',
+      title: 'Demo Started',
+      message: `Started sandbox demo session for ${newVendor.name}.`,
+      actorName: activeStaffSession?.fullName || 'System'
+    });
+
+    alert('Sandbox demo started successfully. Storage mode is locked to localOnly.');
+  };
+
+  const handleResetDemo = () => {
+    // Clear demo data
+    const nonDemosVendors = vendors.filter(v => v.assignedPlanId !== 'VENDOR_DEMO');
+    const nonDemosLicenses = posLicenses.filter(l => l.planName !== 'Vendor Demo');
+
+    setVendors(nonDemosVendors);
+    setPosLicenses(nonDemosLicenses);
+
+    localStorage.setItem('sgn_vendors', JSON.stringify(nonDemosVendors));
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify(nonDemosLicenses));
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'VENDOR_DEMO_RESET',
+      targetType: 'demo',
+      targetId: 'all',
+      result: 'success',
+      message: 'Reset sandbox demo databases. All local demo logs purged.'
+    });
+
+    alert('Local sandbox demo data reset successfully.');
+  };
+
+  const handleConvertDemoToPaid = (vendor: Vendor) => {
+    if (!vendor) return;
+    
+    // Change plan & issue starter license
+    const starterPlan = plans.find(p => p.id === 'PLN-POS-STARTER') || plans[0];
+    const key = `ITRD-POS-${Math.floor(1000 + Math.random() * 9000).toString(16).toUpperCase()}-LIC`;
+    const licId = `POS-LIC-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const updatedVendors = vendors.map(v => {
+      if (v.id === vendor.id) {
+        return {
+          ...v,
+          assignedPlanId: starterPlan.id,
+          assignedPlanName: starterPlan.name,
+          licenseKey: key
+        };
+      }
+      return v;
+    });
+
+    const demoLic = posLicenses.find(l => l.vendorName === vendor.name);
+    let updatedLicenses: POSLicense[];
+
+    const newLicense: POSLicense = {
+      id: licId,
+      vendorName: vendor.name,
+      terminalId: 'TRM-PROD-CONV',
+      licenseKey: key,
+      status: 'Active',
+      issuedAt: new Date().toISOString().split('T')[0],
+      planName: starterPlan.name,
+      expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      notes: 'Upgraded from Local Demo mode',
+      billingCycle: 'Monthly',
+      tokenPrice: starterPlan.price,
+      collectionTag: 'Demo Upgraded'
+    };
+
+    if (demoLic) {
+      updatedLicenses = posLicenses.map(l => l.id === demoLic.id ? newLicense : l);
+    } else {
+      updatedLicenses = [newLicense, ...posLicenses];
     }
+
+    setVendors(updatedVendors);
+    setPosLicenses(updatedLicenses);
+
+    localStorage.setItem('sgn_vendors', JSON.stringify(updatedVendors));
+    localStorage.setItem('sgn_pos_licenses', JSON.stringify(updatedLicenses));
+
+    // Update workflow
+    onAddWorkflow({
+      workflowType: 'vendor_activation',
+      title: `Conversion: ${vendor.name}`,
+      description: 'Demo converted to paid Starter subscription plan.',
+      status: 'completed',
+      requesterId: activeStaffSession?.staffId || 'system',
+      requesterName: activeStaffSession?.fullName || 'System Operator',
+      targetId: vendor.id,
+      targetType: 'vendor',
+      currentStep: 5,
+      totalSteps: 5
+    });
+
+    onAddWorkspaceAuditEvent({
+      workspaceId: 'licensing_centre',
+      actorStaffId: activeStaffSession?.staffId || 'system',
+      actorName: activeStaffSession?.fullName || 'System',
+      activeDeskId: activeStaffSession?.activeDeskId || 'desk_sysadmin',
+      action: 'VENDOR_DEMO_CONVERSION',
+      targetType: 'demo',
+      targetId: vendor.id,
+      result: 'success',
+      message: `Upgraded demo store "${vendor.name}" to production paid Starter POS plan.`
+    });
+
+    onAddWorkspaceNotification({
+      title: 'Demo converted to Paid',
+      message: `Vendor ${vendor.name} converted successfully to Starter POS plan.`,
+      type: 'license',
+      priority: 'normal',
+      targetPath: '/pos',
+      workspaceId: 'licensing_centre'
+    });
+
+    alert(`Conversion successful. Vendor ${vendor.name} upgraded to Starter POS.`);
   };
 
-  const handleOpenHistory = (lic: POSLicense) => {
-    setSelectedLicense(lic);
-    setIsHistoryOpen(true);
-  };
-
-  // Dynamic filter for Tab 1 Licenses Table
+  // Filtered Licenses for Table
   const filteredLicenses = useMemo(() => {
-    return posLicenses.filter((lic: POSLicense) => {
-      const search = searchQuery.toLowerCase();
-      const matchesSearch = 
-        lic.vendorName.toLowerCase().includes(search) ||
-        (lic.planName || '').toLowerCase().includes(search) ||
-        lic.licenseKey.toLowerCase().includes(search) ||
-        lic.id.toLowerCase().includes(search) ||
-        lic.terminalId.toLowerCase().includes(search);
-      
-      const matchesStatus = filterStatus === 'All' || lic.status === filterStatus;
-      return matchesSearch && matchesStatus;
+    return posLicenses.filter(l => {
+      const q = searchQuery.toLowerCase();
+      const matchSearch = !q || 
+        l.id.toLowerCase().includes(q) ||
+        l.vendorName.toLowerCase().includes(q) ||
+        l.planName.toLowerCase().includes(q) ||
+        l.licenseKey.toLowerCase().includes(q);
+
+      const matchStatus = filterStatus === 'all' || l.status === filterStatus;
+
+      return matchSearch && matchStatus;
     });
   }, [posLicenses, searchQuery, filterStatus]);
 
-  const filteredAuditTimeline = useMemo(() => {
-    if (!selectedLicense) return [];
-    const key = selectedLicense.terminalId;
-    const vendor = selectedLicense.vendorName;
-    const id = selectedLicense.id;
-    return auditLogs.filter((log: any) => {
-      return (
-        log.target.includes(key) || 
-        log.target.includes(vendor) || 
-        log.target.includes(id) ||
-        log.action.includes('POS_LICENSE') ||
-        log.action.includes('TOKEN')
-      );
-    });
-  }, [selectedLicense, auditLogs]);
-
-
-  // ==========================================================================
-  // TAB 2: LICENSING TOKEN GENERATOR STATE & HANDLERS
-  // ==========================================================================
-  const [genVendorId, setGenVendorId] = useState('');
-  const [genPlanId, setGenPlanId] = useState('');
-  const [genBillingCycle, setGenBillingCycle] = useState<'Monthly' | 'Quarterly' | 'Yearly'>('Monthly');
-  const [genCollectionTag, setGenCollectionTag] = useState('European Expansion');
-  const [customTagInput, setCustomTagInput] = useState('');
-  const [isCustomTagSelected, setIsCustomTagSelected] = useState(false);
-  const [genNotes, setGenNotes] = useState('');
-
-  // Cryptographic generation process simulation
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationStep, setGenerationStep] = useState('');
-  const [generatedTokenResult, setGeneratedTokenResult] = useState<string | null>(null);
-  const [copiedToken, setCopiedToken] = useState(false);
-
-  // Dynamically compile a list of unique collection tags across licenses
-  const uniqueCollections = useMemo(() => {
-    const tagsSet = new Set<string>();
-    posLicenses.forEach((lic: POSLicense) => {
-      if (lic.collectionTag) tagsSet.add(lic.collectionTag);
-    });
-    // Add default initial collections if none exist
-    tagsSet.add('European Expansion');
-    tagsSet.add('Tokyo Stores');
-    tagsSet.add('US Logistics');
-    tagsSet.add('Sydney Retail');
-    tagsSet.add('Milan Runway');
-    return Array.from(tagsSet);
-  }, [posLicenses]);
-
-  // Set default form selections on load
-  React.useEffect(() => {
-    const activeV = vendors.filter((v: Vendor) => v.status === 'Active');
-    if (activeV.length > 0 && !genVendorId) {
-      setGenVendorId(activeV[0].id);
-    }
-    const posP = plans.filter((p: Plan) => p.type === 'POS' || p.type === 'Hybrid');
-    if (posP.length > 0 && !genPlanId) {
-      setGenPlanId(posP[0].id);
-    }
-  }, [vendors, plans]);
-
-  // Pricing calculations
-  const calculatedPricing = useMemo(() => {
-    const plan = plans.find((p: Plan) => p.id === genPlanId);
-    if (!plan) return { basePrice: 0, months: 0, subtotal: 0, discountRate: 0, discountAmt: 0, finalPrice: 0 };
-    
-    const basePrice = plan.price;
-    let months = 1;
-    let discountRate = 0; // 0% monthly, 10% quarterly, 20% yearly
-
-    if (genBillingCycle === 'Monthly') {
-      months = 1;
-      discountRate = 0;
-    } else if (genBillingCycle === 'Quarterly') {
-      months = 3;
-      discountRate = 0.10;
-    } else if (genBillingCycle === 'Yearly') {
-      months = 12;
-      discountRate = 0.20;
-    }
-
-    const subtotal = basePrice * months;
-    const discountAmt = subtotal * discountRate;
-    const finalPrice = Math.round(subtotal - discountAmt);
-
-    return {
-      basePrice,
-      months,
-      subtotal,
-      discountRate,
-      discountAmt,
-      finalPrice
-    };
-  }, [genPlanId, genBillingCycle, plans]);
-
-  const liveTokenPreview = useMemo(() => {
-    const vendor = vendors.find((v: Vendor) => v.id === genVendorId);
-    const plan = plans.find((p: Plan) => p.id === genPlanId);
-    if (!vendor || !plan) return 'SGN-LIC-PREVIEW-HASH';
-    
-    const cycleChar = genBillingCycle.substring(0, 1).toUpperCase();
-    const vendorAbbr = vendor.name.substring(0, 3).toUpperCase().replace(/\s/g, 'X');
-    const planAbbr = plan.name.substring(0, 3).toUpperCase().replace(/\s/g, 'X');
-    return `SGN-LIC-${cycleChar}-${vendorAbbr}-${planAbbr}-PREV-8F4C`;
-  }, [genVendorId, genPlanId, genBillingCycle, vendors, plans]);
-
-  const handleStartGenerateToken = () => {
-    const vendor = vendors.find((v: Vendor) => v.id === genVendorId);
-    const plan = plans.find((p: Plan) => p.id === genPlanId);
-
-    if (!vendor) {
-      alert('Error: Please select a valid merchant vendor.');
-      return;
-    }
-    if (!plan) {
-      alert('Error: Please select a valid plan.');
-      return;
-    }
-
-    setIsGenerating(true);
-    setGeneratedTokenResult(null);
-    setCopiedToken(false);
-
-    // Dynamic progression states
-    setGenerationStep('1/4 RECOGNIZING MERCHANT REGISTRY SECURE ID...');
-    
-    setTimeout(() => {
-      setGenerationStep('2/4 CRYPTOGRAPHIC BINDING TO SLABS PLAN: ' + plan.name.toUpperCase());
-      
-      setTimeout(() => {
-        setGenerationStep('3/4 DEPLOYING SHA256 PUBLIC CODES & SALTS...');
-        
-        setTimeout(() => {
-          setGenerationStep('4/4 RE-INDEXING DISTRIBUTED LEDGER LEDGER CONTROLLERS...');
-          
-          setTimeout(() => {
-            // Generate real cryptographic looking token
-            const cycleChar = genBillingCycle.substring(0, 1).toUpperCase();
-            const vendorAbbr = vendor.name.substring(0, 3).toUpperCase().replace(/\s/g, 'X');
-            const planAbbr = plan.name.substring(0, 3).toUpperCase().replace(/\s/g, 'X');
-            const randHex = () => Math.floor(16**3 + Math.random()*(16**4 - 16**3)).toString(16).toUpperCase();
-            const tokenKey = `SGN-LIC-${cycleChar}-${vendorAbbr}-${planAbbr}-${randHex()}-${randHex()}`;
-
-            const finalCollectionTag = isCustomTagSelected ? (customTagInput.trim() || 'New Ingress Collection') : genCollectionTag;
-
-            // Compute expiration date
-            const today = new Date();
-            let expMonths = 1;
-            if (genBillingCycle === 'Quarterly') expMonths = 3;
-            if (genBillingCycle === 'Yearly') expMonths = 12;
-            today.setMonth(today.getMonth() + expMonths);
-            const formattedExpDate = today.toISOString().split('T')[0];
-
-            // Setup new license item
-            const newLicId = `POS-LIC-${Math.floor(1000 + Math.random() * 9000)}`;
-            const randTermId = `TRM-${vendorAbbr}-${Math.floor(100 + Math.random() * 900)}`;
-
-            const newLicense: POSLicense = {
-              id: newLicId,
-              vendorName: vendor.name,
-              terminalId: randTermId,
-              licenseKey: tokenKey,
-              status: 'Active',
-              issuedAt: new Date().toISOString().split('T')[0],
-              planName: plan.name,
-              expiryDate: formattedExpDate,
-              notes: genNotes.trim() || `Automated licensing token issued for term: ${genBillingCycle}.`,
-              billingCycle: genBillingCycle,
-              tokenPrice: calculatedPricing.finalPrice,
-              collectionTag: finalCollectionTag
-            };
-
-            // Commit license state
-            setPosLicenses((prev: POSLicense[]) => [newLicense, ...prev]);
-
-            // Commit finance transaction record
-            const newTxnId = `TXN-${Math.floor(100 + Math.random() * 900)}`;
-            const newTxn = {
-              id: newTxnId,
-              description: `${vendor.name} - Issued ${genBillingCycle} Token (Plan: ${plan.name})`,
-              amount: calculatedPricing.finalPrice,
-              type: 'Credit' as const,
-              date: new Date().toISOString().split('T')[0],
-              refNo: `REF-SGN-${Math.floor(10000 + Math.random() * 90000)}`
-            };
-            setFinanceRecords((prev: any) => [newTxn, ...prev]);
-
-            // Add Log and Notification in context
-            if (addLogAndNotify) {
-              addLogAndNotify(
-                currentAdmin?.name || 'SysOp',
-                'GENERATE_LICENSING_TOKEN',
-                `${vendor.name} • ${tokenKey.substring(0, 15)}...`,
-                'Success',
-                'success',
-                'Cryptographic License Token Generated',
-                `Successfully signed a ${genBillingCycle} term token worth $${calculatedPricing.finalPrice} for ${vendor.name}.`
-              );
-            }
-
-            setGeneratedTokenResult(tokenKey);
-            setIsGenerating(false);
-            setGenerationStep('');
-          }, 350);
-        }, 350);
-      }, 350);
-    }, 350);
-  };
-
-  const handleCopyToken = () => {
-    if (generatedTokenResult) {
-      navigator.clipboard.writeText(generatedTokenResult);
-      setCopiedToken(true);
-      setTimeout(() => setCopiedToken(false), 2000);
-    }
-  };
-
-
-  // ==========================================================================
-  // TAB 3: ACTIVE SLABS MATRIX MAIN STATE & HANDLERS
-  // ==========================================================================
-  const [matrixCollectionFilter, setMatrixCollectionFilter] = useState('All');
-  const [matrixPlanFilter, setMatrixPlanFilter] = useState('All');
-  const [matrixCycleFilter, setMatrixCycleFilter] = useState('All');
-  const [matrixSearchQuery, setMatrixSearchQuery] = useState('');
-
-  // Computes the filtered grid of active licensing tokens
-  const activeMatrixData = useMemo(() => {
-    return posLicenses.filter((lic: POSLicense) => {
-      // Must match text search (vendor or key or plan)
-      const search = matrixSearchQuery.toLowerCase();
-      const matchesText = 
-        lic.vendorName.toLowerCase().includes(search) ||
-        (lic.planName || '').toLowerCase().includes(search) ||
-        lic.licenseKey.toLowerCase().includes(search) ||
-        lic.id.toLowerCase().includes(search);
-
-      const matchesCollection = matrixCollectionFilter === 'All' || lic.collectionTag === matrixCollectionFilter;
-      const matchesPlan = matrixPlanFilter === 'All' || lic.planName === matrixPlanFilter;
-      const matchesCycle = matrixCycleFilter === 'All' || lic.billingCycle === matrixCycleFilter;
-
-      return matchesText && matchesCollection && matchesPlan && matchesCycle;
-    });
-  }, [posLicenses, matrixCollectionFilter, matrixPlanFilter, matrixCycleFilter, matrixSearchQuery]);
-
-  // Total summary of current filtered Matrix
-  const matrixStatsSummary = useMemo(() => {
-    let totalValue = 0;
-    let activeCount = 0;
-    let expiredCount = 0;
-
-    activeMatrixData.forEach((lic: POSLicense) => {
-      if (lic.status === 'Active') activeCount++;
-      if (lic.status === 'Expired') expiredCount++;
-      
-      // Calculate normalized monthly value of active licenses for ARR calculation
-      let value = lic.tokenPrice || 49;
-      if (lic.billingCycle === 'Quarterly') {
-        value = Math.round(value / 3);
-      } else if (lic.billingCycle === 'Yearly') {
-        value = Math.round(value / 12);
-      }
-      totalValue += value;
-    });
-
-    return {
-      monthlyValue: totalValue,
-      arr: totalValue * 12,
-      activeCount,
-      expiredCount,
-      totalCount: activeMatrixData.length
-    };
-  }, [activeMatrixData]);
-
-
-  // ==========================================================================
-  // TAB 4: RPN ROUTING LINKER STATE & HANDLERS
-  // ==========================================================================
-  const [linkerVendorId, setLinkerVendorId] = useState('');
-  const [linkerRpnId, setLinkerRpnId] = useState('');
-  const [linkerProtocol, setLinkerProtocol] = useState('TLS 1.3 / ECDHE-RSA');
-  const [linkerLatencyLimit, setLinkerLatencyLimit] = useState('25ms');
-  const [linkerProcessState, setLinkerProcessState] = useState<'idle' | 'processing' | 'success'>('idle');
-  const [linkerSuccessMessage, setLinkerSuccessMessage] = useState('');
-
-  // Populate first unlinked or any vendor as linker defaults
-  React.useEffect(() => {
-    if (vendors.length > 0 && !linkerVendorId) {
-      setLinkerVendorId(vendors[0].id);
-    }
-    if (rpnAgents.length > 0 && !linkerRpnId) {
-      setLinkerRpnId(rpnAgents[0].id);
-    }
-  }, [vendors, rpnAgents]);
-
-  const handleLinkRPN = (e: React.FormEvent) => {
-    e.preventDefault();
-    const vendor = vendors.find(v => v.id === linkerVendorId);
-    const rpn = rpnAgents.find(r => r.id === linkerRpnId);
-
-    if (!vendor) {
-      alert('Error: Please select a valid merchant.');
-      return;
-    }
-
-    setLinkerProcessState('processing');
-
-    setTimeout(() => {
-      // 1. Update Vendor in context state
-      setVendors((prevVendors: Vendor[]) => 
-        prevVendors.map((v: Vendor) => {
-          if (v.id === linkerVendorId) {
-            return {
-              ...v,
-              linkedRpnId: linkerRpnId || undefined,
-              linkedRpnName: rpn ? rpn.name : undefined
-            };
-          }
-          return v;
-        })
-      );
-
-      // 2. Update RPNAgents list in context state
-      setRpnAgents((prevRpn: RPNAgent[]) => 
-        prevRpn.map((r: RPNAgent) => {
-          // If this is the newly linked node, add vendor ID
-          if (linkerRpnId && r.id === linkerRpnId) {
-            const currentList = r.linkedVendorIds || [];
-            if (!currentList.includes(linkerVendorId)) {
-              return { ...r, linkedVendorIds: [...currentList, linkerVendorId] };
-            }
-          }
-          // If this was linked previously, remove vendor ID
-          if (r.id !== linkerRpnId && r.linkedVendorIds?.includes(linkerVendorId)) {
-            return { ...r, linkedVendorIds: r.linkedVendorIds.filter(id => id !== linkerVendorId) };
-          }
-          return r;
-        })
-      );
-
-      // 3. Log & Notify
-      if (addLogAndNotify) {
-        addLogAndNotify(
-          currentAdmin?.name || 'Admin',
-          'LINK_RPN_VENDOR',
-          `${vendor.name} • ${rpn ? rpn.name : 'Unassigned'}`,
-          'Success',
-          'success',
-          'Network Ingress Route Established',
-          rpn 
-            ? `Secured cryptographic tunnel established with ${rpn.name} using ${linkerProtocol} routing under ${linkerLatencyLimit} threshold.`
-            : `Secured tunnel purged for merchant ${vendor.name}.`
-        );
-      }
-
-      setLinkerSuccessMessage(`Successfully routed ${vendor.name} to ${rpn ? rpn.name : 'Unassigned node'}!`);
-      setLinkerProcessState('success');
-
-      setTimeout(() => {
-        setLinkerProcessState('idle');
-        setLinkerSuccessMessage('');
-      }, 3000);
-
-    }, 1500);
-  };
-
-  const handleUnlinkVendor = (vendorId: string) => {
-    const vendor = vendors.find(v => v.id === vendorId);
-    if (!vendor) return;
-
-    const oldRpnId = vendor.linkedRpnId;
-
-    // 1. Clear Vendor linked RPN
-    setVendors((prevVendors: Vendor[]) => 
-      prevVendors.map((v: Vendor) => {
-        if (v.id === vendorId) {
-          return {
-            ...v,
-            linkedRpnId: undefined,
-            linkedRpnName: undefined
-          };
-        }
-        return v;
-      })
-    );
-
-    // 2. Clear from RPNAgent lists
-    if (oldRpnId) {
-      setRpnAgents((prevRpn: RPNAgent[]) => 
-        prevRpn.map((r: RPNAgent) => {
-          if (r.id === oldRpnId) {
-            return {
-              ...r,
-              linkedVendorIds: (r.linkedVendorIds || []).filter(id => id !== vendorId)
-            };
-          }
-          return r;
-        })
-      );
-    }
-
-    if (addLogAndNotify) {
-      addLogAndNotify(
-        currentAdmin?.name || 'Admin',
-        'UNLINK_RPN_VENDOR',
-        `${vendor.name}`,
-        'Warning',
-        'warning',
-        'Network Tunnel Severed',
-        `The secure ingress routing tunnel for ${vendor.name} has been disconnected manually.`
-      );
-    }
-  };
-
-  // Map of RPN nodes with their associated merchants compiled
-  const rpnRoutingData = useMemo(() => {
-    return rpnAgents.map((agent: RPNAgent) => {
-      const merchants = vendors.filter((v: Vendor) => v.linkedRpnId === agent.id);
-      return {
-        ...agent,
-        merchants
-      };
-    });
-  }, [rpnAgents, vendors]);
-
+  // Available vendors for new license issuance
+  const unlicensedVendors = useMemo(() => {
+    return vendors.filter(v => !v.licenseKey);
+  }, [vendors]);
 
   return (
-    <div id="pos_license_manager_container" className="space-y-6">
+    <div className="space-y-6 select-none font-mono text-[#1A1A1A]">
       
-      {/* 1. HEADER SECTION */}
-      <div id="pos_licensing_header" className="flex flex-col md:flex-row md:items-center md:justify-between border-b-4 border-[#1A1A1A] pb-5 gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center space-x-2">
-            <Terminal className="w-5 h-5 text-[#FF5A00]" />
-            <h1 className="text-xl font-black font-sans text-[#1A1A1A] uppercase tracking-wider">Enterprise SGN Licensing Hub</h1>
-          </div>
-          <p className="text-xs text-gray-500 font-mono">seiGEN COMMERCE INFRASTRUCTURE • LICENSE ROTATION & INGRESS ROUTING</p>
+      {/* Header and Switcher tabs */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-[#D1D1CF] pb-4">
+        <div className="text-left">
+          <h1 className="text-sm font-black uppercase tracking-widest text-[#1A1A1A] font-sans">
+            POS & Terminal License Enclave
+          </h1>
+          <p className="text-[10px] text-gray-500 font-medium font-sans">
+            Cryptographic key validation and sandbox local testing command center.
+          </p>
         </div>
 
-        {/* TOP TAB SWITCHER PANEL */}
-        <div className="flex border-2 border-[#1A1A1A] bg-[#EAEAE8] p-0.5 gap-0.5 shrink-0">
+        <div className="flex border-2 border-[#1A1A1A] bg-white text-[9px] font-black uppercase rounded-none">
           <button
-            id="tab_trigger_licenses"
-            onClick={() => setActiveTab('licenses')}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
-              activeTab === 'licenses' ? 'bg-[#1A1A1A] text-white' : 'text-gray-600 hover:bg-white/50'
+            onClick={() => setActiveTab('manager')}
+            className={`px-3 py-1.5 cursor-pointer transition-all border-r border-[#1A1A1A] ${
+              activeTab === 'manager' ? 'bg-[#1A1A1A] text-white' : 'hover:bg-[#F4F4F1] text-gray-700 bg-transparent'
             }`}
           >
-            1. Terminal Keys
+            License Manager & Val
           </button>
           <button
-            id="tab_trigger_activation_bridge"
-            onClick={() => setActiveTab('activation-bridge')}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
-              activeTab === 'activation-bridge' ? 'bg-[#1A1A1A] text-white' : 'text-gray-600 hover:bg-white/50'
+            onClick={() => setActiveTab('demo-licensing')}
+            className={`px-3 py-1.5 cursor-pointer transition-all ${
+              activeTab === 'demo-licensing' ? 'bg-[#1A1A1A] text-white' : 'hover:bg-[#F4F4F1] text-gray-700 bg-transparent'
             }`}
           >
-            2. POS Activation Bridge
-          </button>
-          <button
-            id="tab_trigger_generator"
-            onClick={() => setActiveTab('generator')}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
-              activeTab === 'generator' ? 'bg-[#1A1A1A] text-white' : 'text-gray-600 hover:bg-white/50'
-            }`}
-          >
-            2. Token Generator
-          </button>
-          <button
-            id="tab_trigger_matrix"
-            onClick={() => setActiveTab('matrix')}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
-              activeTab === 'matrix' ? 'bg-[#1A1A1A] text-white' : 'text-gray-600 hover:bg-white/50'
-            }`}
-          >
-            3. Slabs Matrix
-          </button>
-          <button
-            id="tab_trigger_linker"
-            onClick={() => setActiveTab('rpn-linker')}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
-              activeTab === 'rpn-linker' ? 'bg-[#1A1A1A] text-white' : 'text-gray-600 hover:bg-white/50'
-            }`}
-          >
-            4. RPN Linker
+            Demo Licensing
           </button>
         </div>
       </div>
 
-
-      {/* ==========================================================================
-         A. VIEW: TAB 1 - CLASSIC TERMINAL LICENSES TABLE
-         ========================================================================== */}
-      {activeTab === 'licenses' && (
-        <div id="subview_licenses_table" className="space-y-6 animate-fade-in">
+      {/* RENDER TAB 1: LICENSE MANAGER + VALIDATION + TIMELINE */}
+      {activeTab === 'manager' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           
-          {/* HARDWARE OVERVIEW METRICS */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-[#FF5A00] uppercase text-[9px] font-bold">PRODUCTION LICENSES</div>
-              <div className="text-2xl font-black text-[#1A1A1A] mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO')).length}
-              </div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">
-                Active: {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && l.status === 'Active').length} Cloud
-              </div>
-            </div>
-
-            <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-orange-600 uppercase text-[9px] font-bold">DEMO LICENSES</div>
-              <div className="text-2xl font-black text-[#1A1A1A] mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => l.id.includes('DEMO')).length}
-              </div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">
-                Active: {posLicenses.filter((l: POSLicense) => l.id.includes('DEMO') && l.status === 'Active').length} Local
-              </div>
-            </div>
-
-            <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-emerald-600 uppercase text-[9px] font-bold">ACTIVE PROD KEYS</div>
-              <div className="text-2xl font-black text-emerald-600 mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && l.status === 'Active').length}
-              </div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">Rotational cycle live</div>
-            </div>
-
-            <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm">
-              <div className="text-amber-600 uppercase text-[9px] font-bold">SUSPENDED PROD</div>
-              <div className="text-2xl font-black text-amber-600 mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && l.status === 'Suspended').length}
-              </div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">Access frozen</div>
-            </div>
-
-            <div className="bg-white border-2 border-[#1A1A1A] p-3.5 font-mono text-xs shadow-sm col-span-2 lg:col-span-1">
-              <div className="text-red-600 uppercase text-[9px] font-bold">EXPIRED / REVOKED PROD</div>
-              <div className="text-2xl font-black text-red-600 mt-1 font-sans">
-                {posLicenses.filter((l: POSLicense) => !l.id.includes('DEMO') && (l.status === 'Expired' || l.status === 'Deactivated')).length}
-              </div>
-              <div className="text-[9px] text-gray-500 mt-1 uppercase">Purged or out of date</div>
-            </div>
-          </div>
-
-          {/* FILTER AND SEARCH UTILITY */}
-          <div className="bg-[#EAEAE8] border border-[#D1D1CF] p-3 flex flex-col md:flex-row md:items-center justify-between gap-4 font-mono text-xs">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 max-w-xl">
-              <span className="text-gray-500 uppercase text-[10px] block py-1 font-bold shrink-0">Search Keys:</span>
-              <div className="relative w-full">
-                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
+          {/* Left / Table area (Col span 2) */}
+          <div className="lg:col-span-2 space-y-4 text-left">
+            
+            {/* Search and Filters */}
+            <div className="bg-white border-2 border-[#1A1A1A] p-4 flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
                 <input
                   type="text"
-                  placeholder="SEARCH VENDOR, PLAN NAME, KEY OR TERMINAL ID..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-white border border-[#D1D1CF] py-2 pl-9 pr-4 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase placeholder:text-gray-400"
+                  placeholder="Search keys, ID, vendor..."
+                  className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 pl-9 text-xs focus:outline-none focus:border-[#FF5A00] rounded-none font-bold uppercase tracking-wider"
                 />
               </div>
+
+              <div className="flex items-center space-x-2">
+                <Sliders className="w-4 h-4 text-gray-500 shrink-0" />
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="bg-white border-2 border-[#1A1A1A] p-1.5 text-[9px] font-black focus:outline-none uppercase cursor-pointer rounded-none"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="Active">Active</option>
+                  <option value="Suspended">Suspended</option>
+                  <option value="Expired">Expired</option>
+                  <option value="Revoked">Revoked</option>
+                </select>
+              </div>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center space-x-2">
-                <span className="text-gray-500 uppercase text-[10px] font-bold">TPM Status:</span>
-                <div className="inline-flex border border-[#D1D1CF] bg-white">
-                  {['All', 'Active', 'Suspended', 'Deactivated', 'Expired'].map((status) => (
-                    <button
-                      key={status}
-                      onClick={() => setFilterStatus(status)}
-                      className={`px-2.5 py-1 text-[9px] font-bold uppercase transition-all cursor-pointer ${
-                        filterStatus === status 
-                          ? 'bg-[#1A1A1A] text-white' 
-                          : 'text-gray-600 hover:bg-gray-100'
-                      }`}
-                    >
-                      {status}
-                    </button>
-                  ))}
+            {/* License registry Table */}
+            <div className="bg-white border-2 border-[#1A1A1A] overflow-hidden">
+              
+              <div className="bg-[#FAF9F6] border-b border-[#1A1A1A] p-2.5 flex justify-between items-center text-[9px] font-black uppercase text-gray-500">
+                <div className="flex items-center space-x-2">
+                  <Terminal className="w-3.5 h-3.5" />
+                  <span>Licensed Terminals Registry</span>
+                </div>
+                
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => {
+                      if (unlicensedVendors.length === 0) {
+                        alert('All vendors currently possess active or pending POS licenses.');
+                        return;
+                      }
+                      setIssueVendorId(unlicensedVendors[0].id);
+                      setIssuePlanId(plans[0]?.id || 'PLN-POS-STARTER');
+                      setIsIssueModalOpen(true);
+                    }}
+                    className="bg-white border border-[#1A1A1A] hover:bg-[#FF5A00] hover:text-white px-2 py-1 text-[8px] font-black uppercase tracking-wider cursor-pointer"
+                  >
+                    Issue License
+                  </button>
+
+                  {selectedLicense && (
+                    <>
+                      <button
+                        onClick={handleRenewLicense}
+                        className="bg-white border border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white px-2 py-1 text-[8px] font-black uppercase cursor-pointer"
+                      >
+                        Renew
+                      </button>
+                      <button
+                        onClick={handleSuspendLicense}
+                        className="bg-white border border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white px-2 py-1 text-[8px] font-black uppercase cursor-pointer"
+                      >
+                        Suspend
+                      </button>
+                      <button
+                        onClick={handleRevokeLicense}
+                        className="bg-white border border-[#1A1A1A] hover:bg-red-650 hover:text-white px-2 py-1 text-[8px] font-black uppercase cursor-pointer"
+                      >
+                        Revoke
+                      </button>
+                      <button
+                        onClick={handleExpireLicense}
+                        className="bg-white border border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white px-2 py-1 text-[8px] font-black uppercase cursor-pointer"
+                      >
+                        Expire
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
-              <button
-                id="btn_issue_license_trigger"
-                onClick={handleOpenDrawer}
-                className="flex items-center justify-center space-x-1.5 bg-[#FF5A00] hover:bg-[#1A1A1A] text-white text-[10px] font-sans font-black py-2 px-3 uppercase tracking-wider transition-all duration-150 rounded-none cursor-pointer border-2 border-transparent"
-              >
-                <Plus className="w-3 h-3 shrink-0" />
-                <span>Issue Key</span>
-              </button>
-            </div>
-          </div>
-
-          {/* TABLE */}
-          <div className="bg-white border-2 border-[#1A1A1A] shadow-sm">
-            <div className="p-4 border-b border-[#D1D1CF] bg-[#F4F4F1] flex justify-between items-center text-xs font-mono text-gray-500">
-              <span className="uppercase text-[#1A1A1A] font-bold">CRYPTO REGISTRY DATA STREAM ({filteredLicenses.length} MATCHES)</span>
-              <span className="flex items-center text-[10px] text-green-700 font-bold uppercase">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse mr-2"></span>
-                Node Controller Connected
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse font-mono text-xs">
-                <thead>
-                  <tr className="bg-[#EAEAE8] border-b border-[#D1D1CF] text-gray-600 uppercase tracking-wider">
-                    <th className="p-3">Vendor / Merchant</th>
-                    <th className="p-3">Plan Class</th>
-                    <th className="p-3">Cryptographic License Key</th>
-                    <th className="p-3">Activation Date</th>
-                    <th className="p-3">Expiry</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3 text-right">Operations Suite</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#D1D1CF]">
-                  {filteredLicenses.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-12 text-center text-gray-400 uppercase font-bold text-xs bg-gray-50">
-                        NO HARDWARE GATEWAY RECORDS BINDING THESE FILTERS
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-[9px] font-mono">
+                  <thead>
+                    <tr className="bg-stone-50 border-b border-[#1A1A1A] uppercase font-bold text-[8px] tracking-wider text-gray-500">
+                      <th className="p-3 border-r border-gray-200">License ID</th>
+                      <th className="p-3 border-r border-gray-200">Vendor</th>
+                      <th className="p-3 border-r border-gray-200">Pricing Plan</th>
+                      <th className="p-3 border-r border-gray-200">Key Signature</th>
+                      <th className="p-3 border-r border-gray-200">Limits</th>
+                      <th className="p-3 border-r border-gray-200">Expiry</th>
+                      <th className="p-3">Status</th>
                     </tr>
-                  ) : (
-                    filteredLicenses.map((lic: POSLicense) => {
-                      const linkedVendorObj = vendors.find(v => v.name === lic.vendorName);
-                      return (
-                        <tr key={lic.id} className="hover:bg-[#F9F9F8] transition-colors">
-                          <td className="p-3 align-middle">
-                            <div className="space-y-0.5">
-                              <div className="font-sans font-bold text-sm text-[#1A1A1A]">{lic.vendorName}</div>
-                              <div className="text-[10px] text-gray-500 flex flex-wrap items-center gap-1.5">
-                                <span className="font-bold bg-[#1A1A1A] text-white px-1 py-0.2 text-[8px] uppercase">{lic.id}</span>
-                                <span>ID: {lic.terminalId}</span>
-                                {lic.collectionTag && (
-                                  <span className="bg-gray-200 text-gray-800 text-[8px] px-1 font-extrabold uppercase rounded-sm">
-                                    {lic.collectionTag}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="p-3 align-middle">
-                            <div className="space-y-1">
-                              <span className="bg-orange-50 border border-orange-200 text-[#FF5A00] font-bold px-1.5 py-0.5 text-[9px] uppercase">
-                                {lic.planName || 'Starter POS'}
-                              </span>
-                              {lic.billingCycle && (
-                                <span className="block text-[9px] text-gray-400 uppercase font-semibold">
-                                  Term: {lic.billingCycle}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="p-3 align-middle">
-                            <div className="font-mono text-[11px] font-bold text-gray-700 bg-gray-100 border border-dotted border-gray-300 px-2 py-1 inline-flex items-center space-x-1">
-                              <Key className="w-3 h-3 text-[#FF5A00] shrink-0" />
-                              <span>{lic.licenseKey}</span>
-                            </div>
-                          </td>
-
-                          <td className="p-3 align-middle text-gray-600">
-                            <div className="flex items-center space-x-1">
-                              <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                              <span>{lic.issuedAt}</span>
-                            </div>
-                          </td>
-
-                          <td className="p-3 align-middle">
-                            {lic.expiryDate ? (
-                              <div className="space-y-0.5">
-                                <div className="flex items-center space-x-1 text-gray-700 font-bold">
-                                  <Clock className="w-3.5 h-3.5 text-gray-400" />
-                                  <span>{lic.expiryDate}</span>
-                                </div>
-                                {lic.status === 'Active' && (
-                                  <span className="text-[9px] text-gray-400 block uppercase">
-                                    ROTATION PENDING
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 italic">No expiry specified</span>
-                            )}
-                          </td>
-
-                          <td className="p-3 align-middle">
-                            <span className={`px-2 py-1 font-black text-[9px] uppercase inline-flex items-center border ${
-                              lic.status === 'Active' ? 'bg-green-50 text-green-700 border-green-300' :
-                              lic.status === 'Suspended' ? 'bg-amber-50 text-amber-700 border-amber-300' :
-                              lic.status === 'Deactivated' ? 'bg-red-50 text-red-700 border-red-300' :
-                              lic.status === 'Expired' ? 'bg-orange-50 text-orange-700 border-orange-300' :
-                              'bg-yellow-50 text-yellow-700 border-yellow-300'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 mr-1.5 ${
-                                lic.status === 'Active' ? 'bg-green-500' :
-                                lic.status === 'Suspended' ? 'bg-amber-500' :
-                                lic.status === 'Deactivated' ? 'bg-red-500' :
-                                lic.status === 'Expired' ? 'bg-orange-500' :
-                                'bg-yellow-500'
-                              }`} />
-                              {lic.status}
-                            </span>
-                          </td>
-
-                          <td className="p-3 align-middle text-right">
-                            <div className="flex items-center justify-end space-x-1">
-                              <button
-                                title="Renew & Cycle Keys"
-                                onClick={() => handleRenew(lic)}
-                                disabled={lic.status === 'Deactivated'}
-                                className={`p-1.5 border font-bold text-[10px] transition-colors inline-flex items-center justify-center cursor-pointer ${
-                                  lic.status === 'Deactivated' 
-                                    ? 'border-gray-200 text-gray-300 cursor-not-allowed bg-gray-50' 
-                                    : 'border-green-600 hover:bg-green-50 text-green-700'
-                                }`}
-                              >
-                                <RefreshCw className="w-3 h-3 shrink-0" />
-                                <span className="ml-1 hidden xl:inline">Renew</span>
-                              </button>
-
-                              <button
-                                title="Suspend Gateway"
-                                onClick={() => handleSuspend(lic)}
-                                disabled={lic.status === 'Suspended' || lic.status === 'Deactivated'}
-                                className={`p-1.5 border font-bold text-[10px] transition-colors inline-flex items-center justify-center cursor-pointer ${
-                                  lic.status === 'Suspended' || lic.status === 'Deactivated'
-                                    ? 'border-gray-200 text-gray-300 cursor-not-allowed bg-gray-50'
-                                    : 'border-amber-600 hover:bg-amber-50 text-amber-700'
-                                }`}
-                              >
-                                <Ban className="w-3 h-3 shrink-0" />
-                                <span className="ml-1 hidden xl:inline">Suspend</span>
-                              </button>
-
-                              <button
-                                title="Deactivate Permanently"
-                                onClick={() => handleDeactivate(lic)}
-                                disabled={lic.status === 'Deactivated'}
-                                className={`p-1.5 border font-bold text-[10px] transition-colors inline-flex items-center justify-center cursor-pointer ${
-                                  lic.status === 'Deactivated'
-                                    ? 'border-gray-200 text-gray-300 cursor-not-allowed bg-gray-50'
-                                    : 'border-red-600 hover:bg-red-50 text-red-600'
-                                }`}
-                              >
-                                <X className="w-3 h-3 shrink-0" />
-                                <span className="ml-1 hidden xl:inline">Deactivate</span>
-                              </button>
-
-                              <button
-                                title="Audit Timeline"
-                                onClick={() => handleOpenHistory(lic)}
-                                className="p-1.5 border border-[#1A1A1A] hover:bg-[#1A1A1A] hover:text-white text-[#1A1A1A] font-bold text-[10px] transition-colors inline-flex items-center justify-center cursor-pointer"
-                              >
-                                <History className="w-3.5 h-3.5 shrink-0" />
-                                <span className="ml-1 hidden xl:inline">History</span>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* SPECS */}
-          <div className="bg-[#1A1A1A] text-white border border-[#2A2A2A] p-4 font-mono text-[11px] space-y-2">
-            <div className="flex items-center space-x-2 text-[#FF5A00] font-black uppercase">
-              <Info className="w-4 h-4" />
-              <span>seiGEN CRYPTO BINDING FRAMEWORK COMPLIANCE</span>
-            </div>
-            <p className="text-gray-400 leading-relaxed">
-              Terminal devices are authorized using continuous public-key rotation. Renewals re-align co-location cache vectors, suspensions hold inbound REST packages instantly, and deactivations purge decryption keys permanently from client TPM memory blocks.
-            </p>
-          </div>
-        </div>
-      )}
-
-
-      {/* ==========================================================================
-         POS ACTIVATION BRIDGE VIEW
-         ========================================================================== */}
-      {activeTab === 'activation-bridge' && (
-        <div id="subview_activation_bridge" className="space-y-6 animate-fade-in">
-          
-          {/* Header block with actions */}
-          <div className="bg-white border-2 border-[#1A1A1A] p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-sm font-bold uppercase text-[#1A1A1A] tracking-wider">POS Activation Bridge Controller</h2>
-              <p className="text-xs text-gray-500 font-sans mt-0.5">Dual-mode licensing authorization & cryptographic validation logs</p>
-            </div>
-            
-            <button
-              onClick={() => {
-                const activeVendors = vendors.filter((v: Vendor) => v.status === 'Active');
-                setActVendorId(activeVendors[0]?.id || (vendors[0]?.id || ''));
-                const posPlans = plans.filter((p: Plan) => p.type === 'POS' || p.type === 'Hybrid');
-                setActPlanId(posPlans[0]?.id || (plans[0]?.id || ''));
-                setActStartDate(new Date().toISOString().split('T')[0]);
-                
-                const expDate = new Date();
-                expDate.setFullYear(expDate.getFullYear() + 1);
-                setActExpiryDate(expDate.toISOString().split('T')[0]);
-                setActNotes('');
-                setIsActivationDrawerOpen(true);
-              }}
-              className="flex items-center space-x-1.5 bg-[#FF5A00] hover:bg-[#1A1A1A] text-white text-[10px] font-sans font-black py-2.5 px-4 uppercase tracking-wider transition-all rounded-none cursor-pointer border-2 border-transparent"
-            >
-              <Plus className="w-3.5 h-3.5 shrink-0" />
-              <span>Issue POS Activation</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Table of Records: Span 2 Columns */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="bg-white border-2 border-[#1A1A1A] shadow-sm">
-                <div className="p-3 bg-[#F4F4F1] border-b border-[#D1D1CF] font-bold text-[#1A1A1A] uppercase tracking-wider text-xs">
-                  Active POS Activation Registry
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse font-mono text-[11px]">
-                    <thead>
-                      <tr className="bg-[#1A1A1A] text-white uppercase text-[9px] border-b border-[#1A1A1A]">
-                        <th className="p-2.5">License Ref</th>
-                        <th className="p-2.5">Merchant Entity</th>
-                        <th className="p-2.5">Parameters / Mode</th>
-                        <th className="p-2.5">Expiration</th>
-                        <th className="p-2.5">Compliance Status</th>
-                        <th className="p-2.5 text-right">Actions</th>
+                  </thead>
+                  <tbody>
+                    {filteredLicenses.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-6 text-center text-gray-400 italic">
+                          No cryptographic licenses discovered matching criteria.
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#D1D1CF]">
-                      {activationRecords.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="p-8 text-center text-gray-405 italic">
-                            No POS activation bridge records registered.
-                          </td>
-                        </tr>
-                      ) : (
-                        activationRecords.map((record) => (
-                          <tr key={record.licenseId} className="hover:bg-[#F9F9F8]">
-                            <td className="p-2.5 font-bold align-middle">
-                              <div>{record.licenseId}</div>
-                              <div className="text-[9px] text-[#FF5A00] uppercase font-semibold mt-0.5">{record.planName}</div>
+                    ) : (
+                      filteredLicenses.map(lic => {
+                        const isSelected = selectedLicenseId === lic.id;
+                        const isDemo = lic.planName === 'Vendor Demo';
+                        
+                        let badge = 'bg-stone-100 text-stone-800 border-stone-300';
+                        if (lic.status === 'Active') badge = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+                        else if (lic.status === 'Suspended') badge = 'bg-yellow-50 text-yellow-800 border-yellow-300';
+                        else if (lic.status === 'Expired') badge = 'bg-red-50 text-red-800 border-red-300';
+                        else if (lic.status === 'Revoked') badge = 'bg-black text-white border-black';
+
+                        return (
+                          <tr
+                            key={lic.id}
+                            onClick={() => setSelectedLicenseId(lic.id)}
+                            className={`border-b border-gray-150 hover:bg-[#FAF9F6] transition-colors cursor-pointer ${
+                              isSelected ? 'bg-orange-50/40 font-bold' : ''
+                            }`}
+                          >
+                            <td className="p-3 border-r border-gray-200 font-bold text-gray-450 flex items-center space-x-1">
+                              <span>{lic.id}</span>
+                              {isDemo && (
+                                <span className="bg-orange-100 text-orange-850 px-1 py-0.2 text-[6px] font-black uppercase tracking-widest border border-orange-200 shrink-0">DEMO</span>
+                              )}
                             </td>
-                            <td className="p-2.5 align-middle">
-                              <div className="font-bold text-[#1A1A1A]">{record.vendorName}</div>
-                              <div className="text-[9px] text-gray-400">ID: {record.vendorId}</div>
+                            <td className="p-3 border-r border-gray-200 font-sans text-gray-800">{lic.vendorName}</td>
+                            <td className="p-3 border-r border-gray-200 font-sans text-gray-500 uppercase text-[8px]">{lic.planName}</td>
+                            <td className="p-3 border-r border-gray-200 font-mono text-[8px] uppercase select-all font-bold text-gray-600">{lic.licenseKey}</td>
+                            <td className="p-3 border-r border-gray-200 text-gray-500 text-[8px]">
+                              {lic.terminalId}
                             </td>
-                            <td className="p-2.5 align-middle">
-                              <div className="flex flex-wrap gap-1">
-                                {record.licenseMode === 'demo' ? (
-                                  <span className="bg-orange-50 border border-orange-200 text-[#FF5A00] font-black px-1.5 py-0.2 text-[8px] uppercase tracking-tight">
-                                    DEMO / LOCAL ONLY
-                                  </span>
-                                ) : (
-                                  <span className="bg-blue-50 border border-blue-200 text-blue-700 font-black px-1.5 py-0.2 text-[8px] uppercase tracking-tight">
-                                    PRODUCTION / CLOUD
-                                  </span>
-                                )}
-                                <span className="bg-stone-100 text-stone-700 border border-stone-200 text-[8px] px-1 py-0.2 font-semibold">
-                                  T:{record.maxTerminals} • B:{record.maxBranches} • S:{record.maxStaff}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="p-2.5 align-middle">
-                              <div className="text-gray-700">{record.expiresAt}</div>
-                              <div className="text-[9px] text-gray-400">Starts: {record.startsAt}</div>
-                            </td>
-                            <td className="p-2.5 align-middle">
-                              <span className={`px-1.5 py-0.5 text-[8px] font-black uppercase inline-flex items-center border ${
-                                record.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-300' :
-                                record.status === 'suspended' ? 'bg-amber-50 text-amber-700 border-amber-300' :
-                                record.status === 'expired' ? 'bg-red-50 text-red-700 border-red-300' :
-                                'bg-stone-50 text-stone-700 border-stone-300'
-                              }`}>
-                                {record.status}
+                            <td className="p-3 border-r border-gray-200 font-mono">{lic.expiryDate}</td>
+                            <td className="p-3">
+                              <span className={`border px-1.5 py-0.2 text-[8px] font-black uppercase ${badge}`}>
+                                {lic.status}
                               </span>
-                            </td>
-                            <td className="p-2.5 align-middle text-right space-x-1">
-                              {record.status !== 'suspended' && record.status !== 'revoked' && (
-                                <button
-                                  onClick={() => {
-                                    updatePOSActivationStatus(record.licenseId, 'suspended');
-                                    setActivationRecords(getPOSActivationRecords());
-                                  }}
-                                  className="text-amber-600 hover:text-amber-800 font-bold uppercase text-[9px] hover:underline"
-                                  title="Suspend POS license state"
-                                >
-                                  Suspend
-                                </button>
-                              )}
-                              {record.status !== 'revoked' && (
-                                <button
-                                  onClick={() => {
-                                    updatePOSActivationStatus(record.licenseId, 'revoked');
-                                    setActivationRecords(getPOSActivationRecords());
-                                  }}
-                                  className="text-red-600 hover:text-red-800 font-bold uppercase text-[9px] hover:underline"
-                                  title="Revoke POS license authorization"
-                                >
-                                  Revoke
-                                </button>
-                              )}
-                              {record.status !== 'expired' && record.status !== 'revoked' && (
-                                <button
-                                  onClick={() => {
-                                    updatePOSActivationStatus(record.licenseId, 'expired');
-                                    setActivationRecords(getPOSActivationRecords());
-                                  }}
-                                  className="text-red-750 hover:text-red-900 font-bold uppercase text-[9px] hover:underline"
-                                  title="Mark POS license as expired"
-                                >
-                                  Expire
-                                </button>
-                              )}
-                              {record.status !== 'active' && (
-                                <button
-                                  onClick={() => {
-                                    updatePOSActivationStatus(record.licenseId, 'active');
-                                    setActivationRecords(getPOSActivationRecords());
-                                  }}
-                                  className="text-emerald-600 hover:text-emerald-800 font-bold uppercase text-[9px] hover:underline"
-                                  title="Reactivate POS license parameters"
-                                >
-                                  Reactivate
-                                </button>
-                              )}
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
+
             </div>
 
-            {/* Validation Panel: Column 3 */}
-            <div className="space-y-4">
-              <div className="bg-white border-2 border-[#1A1A1A] p-4 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold uppercase border-b border-[#D1D1CF] pb-2 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-[#FF5A00]" />
-                  Verify Vendor POS Access
-                </h3>
-
-                <div className="space-y-3 font-sans text-xs">
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] font-bold font-mono">Select Target Vendor</label>
-                    <select
-                      value={validateVendorId}
-                      onChange={(e) => setValidateVendorId(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] font-mono rounded-none uppercase"
-                    >
-                      <option value="">-- Choose Vendor to Check --</option>
-                      {vendors.map((v: Vendor) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name} ({v.id})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    onClick={handleValidateAccess}
-                    className="w-full bg-[#1A1A1A] hover:bg-[#FF5A00] text-white py-2 uppercase font-bold text-center tracking-wide transition-colors font-mono cursor-pointer rounded-none text-[10px]"
-                  >
-                    Validate Vendor POS Access
-                  </button>
-                </div>
-
-                {/* Validation Results Display */}
-                {validationResult && (
-                  <div className="border border-[#D1D1CF] bg-gray-50 p-4 font-mono text-[10px] space-y-3">
-                    <div className="flex items-center justify-between border-b border-[#D1D1CF] pb-2">
-                      <span className="font-bold text-gray-500 uppercase">ACCESS COMPLIANCE STATUS:</span>
-                      <span className={`px-2 py-0.5 font-black uppercase text-[9px] inline-flex items-center border ${
-                        validationResult.allowed 
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-300' 
-                          : 'bg-red-50 text-red-700 border-red-300'
-                      }`}>
-                        {validationResult.allowed ? 'ALLOWED' : 'BLOCKED'}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="text-gray-400 uppercase text-[9px] block">REASON CODE</span>
-                        <span className="font-bold text-[#1A1A1A]">{validationResult.reasonCode}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 uppercase text-[9px] block">LICENSE BIND ID</span>
-                        <span className="font-bold text-[#1A1A1A]">{validationResult.license?.licenseId || 'N/A'}</span>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="text-gray-400 uppercase text-[9px] block">COMPLIANCE DIAGNOSTICS MESSAGE</span>
-                        <span className="font-sans text-xs text-gray-700 leading-normal block mt-0.5">{validationResult.message}</span>
-                      </div>
-                      {validationResult.license && (
-                        <>
-                          <div>
-                            <span className="text-gray-400 uppercase text-[9px] block">LICENSE MODE</span>
-                            <span className="font-bold uppercase">{validationResult.license.licenseMode}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-400 uppercase text-[9px] block">STORAGE MODE</span>
-                            <span className="font-bold uppercase">{validationResult.license.storageMode}</span>
-                          </div>
-                          <div>
-                            <span className="text-gray-400 uppercase text-[9px] block">EXPIRATION DATE</span>
-                            <span className="font-bold">{validationResult.license.expiresAt}</span>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            
           </div>
-        </div>
-      )}
 
-
-      {/* ==========================================================================
-         B. VIEW: TAB 2 - SUBSCRIPTION TERM LICENSE TOKEN GENERATOR
-         ========================================================================== */}
-      {activeTab === 'generator' && (
-        <div id="subview_token_generator" className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in">
-          
-          {/* LEFT FORM COLUMN (8 of 12 spans) */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="bg-white border-2 border-[#1A1A1A] p-6 shadow-sm space-y-6">
+          {/* Right column: validation panel + event logs (Col span 1) */}
+          <div className="lg:col-span-1 space-y-4 text-left">
+            
+            {/* Real-Time Terminal Validation Panel */}
+            <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#FF5A00]" />
               
-              <div className="border-b border-[#D1D1CF] pb-4 flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <Cpu className="w-5 h-5 text-[#FF5A00]" />
-                  <div>
-                    <h2 className="text-sm font-black uppercase tracking-wider text-[#1A1A1A]">TOKEN GENERATOR CONSOLE</h2>
-                    <p className="text-[10px] text-gray-500 font-mono">BETA SIGNING ALGORITHM ENFORCED</p>
-                  </div>
+              <div className="border-b border-[#D1D1CF] pb-2.5 mb-4">
+                <div className="flex items-center space-x-2 text-[#FF5A00] font-black uppercase text-[10px]">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>Real-Time POS Access Validator</span>
                 </div>
-                <div className="bg-[#FF5A00]/10 text-[#FF5A00] font-mono px-2 py-0.5 text-[9px] font-bold uppercase">
-                  SHA-256 ACTIVE
-                </div>
+                <p className="text-[8px] text-gray-400 font-medium font-sans mt-0.5">
+                  Verify cryptographic license clearance before booting endpoint terminal.
+                </p>
               </div>
 
-              {/* GENERATOR OPTIONS INPUTS */}
-              <div className="space-y-4 font-mono text-xs">
-                
-                {/* MERCHANT VENDOR SELECT */}
-                <div className="space-y-1.5">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">1. Target Merchant Vendor</label>
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-gray-500 text-[8px] font-black uppercase">SELECT VENDOR SYSTEM</label>
                   <select
-                    value={genVendorId}
-                    onChange={(e) => setGenVendorId(e.target.value)}
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
+                    value={selectedValidationVendorId}
+                    onChange={(e) => setSelectedValidationVendorId(e.target.value)}
+                    className="w-full bg-[#F4F4F1] border-2 border-[#1A1A1A] p-2 text-xs font-bold focus:outline-none uppercase cursor-pointer"
                   >
-                    {vendors.filter(v => v.status === 'Active').map((v: Vendor) => (
+                    <option value="">-- SELECT VENDOR RECORD --</option>
+                    {vendors.map(v => (
                       <option key={v.id} value={v.id}>
-                        {v.name} ({v.id}) — ACTIVE MERCHANT
-                      </option>
-                    ))}
-                    {vendors.filter(v => v.status !== 'Active').map((v: Vendor) => (
-                      <option key={v.id} value={v.id} disabled>
-                        {v.name} ({v.id}) — [{v.status}] (INELIGIBLE)
+                        {v.name} ({v.id})
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {/* PLANS pricing SLAB SELECT */}
-                <div className="space-y-1.5">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">2. Capacity Pricing Plan Slab</label>
-                  <select
-                    value={genPlanId}
-                    onChange={(e) => setGenPlanId(e.target.value)}
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                  >
-                    {plans.map((p: Plan) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} — ${p.price}/Mo [Terminals: {p.maxTerminals}]
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* TERM INTERVAL SELECTION */}
-                <div className="space-y-1.5">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">3. Subscription Cycle Term</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { id: 'Monthly', label: 'Monthly Term', discount: 'Standard Rate' },
-                      { id: 'Quarterly', label: 'Quarterly Pack', discount: '10% OFF' },
-                      { id: 'Yearly', label: 'Annual Pass', discount: '20% OFF SAVINGS' }
-                    ].map((term) => (
-                      <button
-                        key={term.id}
-                        type="button"
-                        onClick={() => setGenBillingCycle(term.id as any)}
-                        className={`border-2 p-3 text-left transition-all relative cursor-pointer ${
-                          genBillingCycle === term.id 
-                            ? 'border-[#1A1A1A] bg-[#F4F4F1]' 
-                            : 'border-gray-200 hover:border-gray-400 bg-white'
-                        }`}
-                      >
-                        <div className="font-bold text-[#1A1A1A] text-xs uppercase">{term.label}</div>
-                        <div className="text-[9px] font-semibold text-[#FF5A00] uppercase mt-1">{term.discount}</div>
-                        {genBillingCycle === term.id && (
-                          <span className="absolute right-2 top-2 bg-[#FF5A00] text-white p-0.5 text-[7px] font-black uppercase">
-                            ACTIVE
-                          </span>
+                {validationResult ? (
+                  <div className="space-y-3 font-mono text-[9px] uppercase font-bold">
+                    
+                    {/* Status Alert box */}
+                    <div className={`p-3 border-2 flex items-start space-x-2 ${
+                      validationResult.allowed 
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800' 
+                        : 'bg-red-50 border-red-500 text-red-800'
+                    }`}>
+                      <div className="shrink-0 mt-0.5">
+                        {validationResult.allowed ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-red-600" />
                         )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* COLLECTION TAGGING */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">4. Assign to Collections Cluster</label>
-                    <button
-                      type="button"
-                      onClick={() => setIsCustomTagSelected(!isCustomTagSelected)}
-                      className="text-[#FF5A00] hover:underline text-[9px] font-extrabold uppercase"
-                    >
-                      {isCustomTagSelected ? 'Choose Existing Tag' : '+ Create Custom Tag'}
-                    </button>
-                  </div>
-
-                  {isCustomTagSelected ? (
-                    <div className="relative">
-                      <Tag className="absolute left-2.5 top-2.5 w-4 h-4 text-[#FF5A00]" />
-                      <input
-                        type="text"
-                        required
-                        placeholder="ENTER NEW COLLECTION CLUSTER NAME..."
-                        value={customTagInput}
-                        onChange={(e) => setCustomTagInput(e.target.value)}
-                        className="w-full bg-white border-2 border-[#1A1A1A] py-2 pl-9 pr-4 text-xs font-semibold uppercase placeholder:text-gray-400 focus:outline-none"
-                      />
+                      </div>
+                      <div>
+                        <div className="font-black text-[10px] tracking-wide">
+                          VALIDATION STATUS: {validationResult.allowed ? 'ALLOWED' : 'BLOCKED'}
+                        </div>
+                        <p className="font-sans normal-case text-gray-600 text-[9.5px] mt-0.5 leading-normal">
+                          {validationResult.message}
+                        </p>
+                      </div>
                     </div>
-                  ) : (
-                    <select
-                      value={genCollectionTag}
-                      onChange={(e) => setGenCollectionTag(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                    >
-                      {uniqueCollections.map((tag) => (
-                        <option key={tag} value={tag}>
-                          {tag}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
 
-                {/* NOTES */}
-                <div className="space-y-1.5">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">5. Technicians Notes & Details</label>
-                  <textarea
-                    rows={2}
-                    value={genNotes}
-                    onChange={(e) => setGenNotes(e.target.value)}
-                    placeholder="E.g., Special co-location edge configuration, deployment by Vance..."
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs font-semibold placeholder:text-gray-400 focus:outline-none focus:border-[#FF5A00]"
-                  />
-                </div>
+                    {/* Metadata breakdown */}
+                    <div className="p-3 bg-stone-50 border border-[#D1D1CF] space-y-1.5 text-gray-600">
+                      <div className="flex justify-between">
+                        <span>License ID:</span>
+                        <span className="text-gray-900">{validationResult.licenseId}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Pricing Plan:</span>
+                        <span className="text-gray-900">{validationResult.plan}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Expiration:</span>
+                        <span className="text-gray-900">{validationResult.expiry}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Uplink Mode:</span>
+                        <span className="text-orange-500">{validationResult.mode.toUpperCase()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Storage policy:</span>
+                        <span className="text-gray-900">{validationResult.storage.toUpperCase()}</span>
+                      </div>
+                    </div>
 
-              </div>
-
-              {/* GENERATE ACTION AREA */}
-              <div className="pt-4 border-t border-[#D1D1CF] space-y-4">
-                
-                {/* Generation loader states */}
-                {isGenerating ? (
-                  <div className="bg-[#1A1A1A] text-[#FF5A00] p-4 font-mono text-center space-y-2 border-2 border-[#1A1A1A]">
-                    <RefreshCw className="w-6 h-6 animate-spin mx-auto" />
-                    <div className="text-[10px] font-bold uppercase tracking-widest">CRYPTOGRAPHIC COMPILING CYCLE IN PROCESS</div>
-                    <div className="text-[9px] text-gray-400 uppercase tracking-wider">{generationStep}</div>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={handleStartGenerateToken}
-                    className="w-full bg-[#FF5A00] hover:bg-[#1A1A1A] text-white py-3.5 px-4 font-sans font-black text-xs uppercase tracking-wider transition-all duration-150 rounded-none shadow-md cursor-pointer border-2 border-transparent active:translate-y-0.5 flex items-center justify-center space-x-2"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>GENERATE CRYPTO TERM LICENSE KEY</span>
-                  </button>
-                )}
-
-                {/* Success dialog output */}
-                {generatedTokenResult && (
-                  <div className="bg-[#F0FDF4] border-2 border-[#15803D] p-5 font-mono text-xs space-y-3 animate-fade-in">
-                    <div className="flex items-center space-x-2 text-[#15803D] font-bold">
-                      <CheckCircle2 className="w-5 h-5 shrink-0" />
-                      <span className="uppercase text-sm">SECURITY ENVELOPE DIGITALLY SIGNED</span>
-                    </div>
-                    <p className="text-gray-600 text-[11px] leading-relaxed">
-                      Ecosystem ledger reports: <strong>Active credential signed</strong> and registered under cluster index "<em>{isCustomTagSelected ? customTagInput : genCollectionTag}</em>" successfully!
-                    </p>
-
-                    <div className="flex items-center justify-between bg-white border border-[#D1D1CF] p-3 mt-2 rounded-none">
-                      <span className="font-bold text-[#1A1A1A] text-sm select-all pr-2 tracking-wide font-mono">
-                        {generatedTokenResult}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleCopyToken}
-                        className={`px-3 py-1 text-[9px] font-extrabold uppercase transition-all flex items-center space-x-1 cursor-pointer ${
-                          copiedToken ? 'bg-green-700 text-white' : 'bg-[#1A1A1A] hover:bg-[#FF5A00] text-white'
-                        }`}
-                      >
-                        <Copy className="w-3 h-3" />
-                        <span>{copiedToken ? 'COPIED!' : 'COPY'}</span>
-                      </button>
-                    </div>
+                  <div className="bg-gray-50 p-6 text-center text-gray-400 italic text-[9px] border border-dashed border-gray-300 font-bold uppercase">
+                    Select a vendor node from dropdown to compile diagnostics.
                   </div>
                 )}
-
               </div>
-
-            </div>
-          </div>
-
-          {/* RIGHT COST CALCULATOR SIDE PANEL (5 of 12 spans) */}
-          <div className="lg:col-span-5 space-y-6 font-mono text-xs">
-            
-            {/* PRICING BREAKDOWN CARD */}
-            <div className="bg-[#1A1A1A] text-white border-2 border-[#1A1A1A] p-6 shadow-sm space-y-6">
-              
-              <div className="border-b border-white/10 pb-4 flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <DollarSign className="w-4.5 h-4.5 text-[#FF5A00]" />
-                  <span className="font-bold uppercase tracking-wider">LEDGER CALCULATOR</span>
-                </div>
-                <TrendingUp className="w-4 h-4 text-emerald-500" />
-              </div>
-
-              {/* STAT LINES */}
-              <div className="space-y-4 text-[11px]">
-                
-                <div className="flex justify-between border-b border-white/5 pb-2">
-                  <span className="text-gray-400 uppercase">Base Plan Price</span>
-                  <span className="font-bold">${calculatedPricing.basePrice}.00 / Mo</span>
-                </div>
-
-                <div className="flex justify-between border-b border-white/5 pb-2">
-                  <span className="text-gray-400 uppercase">Term Multiplier</span>
-                  <span className="font-bold">x {calculatedPricing.months} Month(s)</span>
-                </div>
-
-                <div className="flex justify-between border-b border-white/5 pb-2">
-                  <span className="text-gray-400 uppercase">Slab Subtotal</span>
-                  <span className="font-bold">${calculatedPricing.subtotal}.00</span>
-                </div>
-
-                <div className="flex justify-between border-b border-white/5 pb-2 text-orange-400">
-                  <span className="uppercase">Discount ({calculatedPricing.discountRate * 100}%)</span>
-                  <span className="font-bold">- ${calculatedPricing.discountAmt.toFixed(2)}</span>
-                </div>
-
-                <div className="flex justify-between border-b border-white/10 pb-4 pt-2 text-white">
-                  <span className="uppercase font-bold text-xs">Net Term Cost</span>
-                  <span className="font-black text-lg text-[#FF5A00] font-sans">
-                    ${calculatedPricing.finalPrice.toLocaleString()}.00
-                  </span>
-                </div>
-
-              </div>
-
-              {/* METRIC ANALYSIS */}
-              <div className="bg-[#2D2D2D] border-l-4 border-[#FF5A00] p-4 text-[10px] text-gray-300 leading-relaxed space-y-1">
-                <span className="text-white font-bold block uppercase mb-1">METRIC ANALYSIS DETAILS:</span>
-                <div>• ARR Contribution: ${(calculatedPricing.finalPrice / calculatedPricing.months * 12).toLocaleString()}.00/Yr</div>
-                <div>• Margin Contribution: +94.2% Operational Margin</div>
-                <div>• Automatic Renewal Grace Period: 15-Day TTL Lock</div>
-              </div>
-
             </div>
 
-            {/* LIVE DIGITAL TOKEN TOKEN MOCK PREVIEW */}
-            <div className="bg-white border-2 border-[#1A1A1A] p-6 shadow-sm space-y-4">
-              <span className="text-gray-500 uppercase text-[9px] font-bold block">LIVE GENERATED CRYPTO PREVIEW</span>
+            {/* License events vertical timeline */}
+            <div className="bg-white border-2 border-[#1A1A1A] p-4 relative shadow-sm">
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#FF5A00]" />
               
-              <div className="bg-[#F4F4F1] border-2 border-dashed border-[#D1D1CF] p-4 flex flex-col justify-between h-40 relative overflow-hidden select-none">
-                
-                {/* Background matrix style watermark */}
-                <div className="absolute right-[-10px] bottom-[-20px] text-gray-200/50 text-[100px] font-black tracking-tighter select-none font-sans uppercase">
-                  SGN
+              <div className="border-b border-[#D1D1CF] pb-2.5 mb-4">
+                <div className="flex items-center space-x-2 text-[#FF5A00] font-black uppercase text-[10px]">
+                  <History className="w-4 h-4 shrink-0" />
+                  <span>License events timeline</span>
                 </div>
-
-                <div className="flex justify-between items-start z-10">
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest block">seiGEN COMMERCE SECURE PROTOCOL</span>
-                    <span className="text-xs text-[#1A1A1A] font-extrabold uppercase font-sans">
-                      {vendors.find(v => v.id === genVendorId)?.name || 'Merchant Loading...'}
-                    </span>
-                  </div>
-                  <div className="bg-[#FF5A00] text-white text-[8px] font-black px-1.5 py-0.5 uppercase tracking-widest">
-                    {genBillingCycle}
-                  </div>
-                </div>
-
-                <div className="z-10 font-bold text-[#1A1A1A] tracking-wider text-[11px] bg-white border border-[#D1D1CF] p-2 inline-block font-mono">
-                  {liveTokenPreview}
-                </div>
-
-                <div className="flex justify-between items-center z-10 text-[9px] text-gray-400">
-                  <span>CAPACITY: {plans.find(p => p.id === genPlanId)?.maxTerminals || 'N/A'} DEVICES</span>
-                  <span>ISSUER: {currentAdmin?.name || 'SYSTEM'}</span>
-                </div>
-
               </div>
+
+              <div className="relative border-l border-[#D1D1CF] pl-4 ml-2 space-y-4 text-left font-sans">
+                {licenseEvents.length === 0 ? (
+                  <div className="text-[9px] text-gray-400 italic uppercase font-mono font-bold">No licensing actions logged in telemetry database.</div>
+                ) : (
+                  licenseEvents.map(e => (
+                    <div key={e.auditId} className="relative">
+                      <div className="absolute -left-6 top-1.5 w-3 h-3 rounded-full border-2 bg-white border-[#FF5A00] flex items-center justify-center">
+                        <div className="w-1.5 h-1.5 bg-[#FF5A00] rounded-full" />
+                      </div>
+                      <div className="text-[9px]">
+                        <div className="font-mono font-black uppercase tracking-wider text-gray-800 flex justify-between">
+                          <span>{e.action.replace('POS_LICENSE_', '')}</span>
+                          <span className="text-[7.5px] text-gray-400 font-normal">[{new Date(e.createdAt).toLocaleTimeString()}]</span>
+                        </div>
+                        <div className="text-gray-500 font-medium text-[8px] leading-relaxed mt-0.5 font-sans normal-case">{e.message}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
             </div>
 
           </div>
@@ -1676,916 +925,161 @@ export default function POSLicensingView() {
         </div>
       )}
 
-
-      {/* ==========================================================================
-         C. VIEW: TAB 3 - ACTIVE LICENSES GROUPED BY VENDOR MATRIX WITH FILTERS
-         ========================================================================== */}
-      {activeTab === 'matrix' && (
-        <div id="subview_slabs_matrix" className="space-y-6 animate-fade-in">
+      {/* RENDER TAB 2: DEMO LICENSING PANEL */}
+      {activeTab === 'demo-licensing' && (
+        <div className="space-y-6 text-left">
           
-          {/* STATS DECK */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-mono text-xs">
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 text-[#1A1A1A]">
-              <span className="text-gray-400 uppercase text-[9px] font-bold">TOTAL COMMITTED MONTHLY REV</span>
-              <div className="text-2xl font-black mt-1 font-sans text-emerald-600">
-                ${matrixStatsSummary.monthlyValue.toLocaleString()}.00
-              </div>
-              <span className="text-[8px] text-gray-400 uppercase">Normalized term values</span>
-            </div>
-
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 text-[#1A1A1A]">
-              <span className="text-gray-400 uppercase text-[9px] font-bold">TOTAL ARR CONTRIBUTION</span>
-              <div className="text-2xl font-black mt-1 font-sans text-emerald-600">
-                ${matrixStatsSummary.arr.toLocaleString()}.00
-              </div>
-              <span className="text-[8px] text-gray-400 uppercase">Annualized projection rate</span>
-            </div>
-
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 text-[#1A1A1A]">
-              <span className="text-gray-400 uppercase text-[9px] font-bold">ACTIVE DEPLOYED ENVELOPE</span>
-              <div className="text-2xl font-black mt-1 font-sans">
-                {matrixStatsSummary.activeCount} / {matrixStatsSummary.totalCount}
-              </div>
-              <span className="text-[8px] text-gray-400 uppercase">Tokens currently active</span>
-            </div>
-
-            <div className="bg-white border-2 border-[#1A1A1A] p-4 text-[#1A1A1A]">
-              <span className="text-gray-400 uppercase text-[9px] font-bold">SUSPENDED OR EXPIRED</span>
-              <div className="text-2xl font-black mt-1 font-sans text-amber-600">
-                {activeMatrixData.filter(lic => lic.status !== 'Active').length}
-              </div>
-              <span className="text-[8px] text-gray-400 uppercase">Operational cycles paused</span>
-            </div>
-          </div>
-
-          {/* FILTERING MATRIX CONTROLS PANEL */}
-          <div className="bg-[#EAEAE8] border border-[#D1D1CF] p-4 font-mono text-xs grid grid-cols-1 md:grid-cols-12 gap-4">
-            
-            <div className="md:col-span-4 space-y-1">
-              <span className="text-gray-500 uppercase text-[9px] font-bold">Search Licenses:</span>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="SEARCH VENDOR OR TOKEN KEY..."
-                  value={matrixSearchQuery}
-                  onChange={(e) => setMatrixSearchQuery(e.target.value)}
-                  className="w-full bg-white border border-[#D1D1CF] py-1.5 pl-9 pr-4 text-xs font-semibold uppercase focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="md:col-span-3 space-y-1">
-              <span className="text-gray-500 uppercase text-[9px] font-bold">Filter Collections Cluster:</span>
-              <select
-                value={matrixCollectionFilter}
-                onChange={(e) => setMatrixCollectionFilter(e.target.value)}
-                className="w-full bg-white border border-[#D1D1CF] p-2 text-xs font-semibold uppercase focus:outline-none"
-              >
-                <option value="All">All Collections ({posLicenses.length})</option>
-                {uniqueCollections.map((colName) => (
-                  <option key={colName} value={colName}>
-                    {colName} ({posLicenses.filter(lic => lic.collectionTag === colName).length})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-3 space-y-1">
-              <span className="text-gray-500 uppercase text-[9px] font-bold">Filter Plan Slabs:</span>
-              <select
-                value={matrixPlanFilter}
-                onChange={(e) => setMatrixPlanFilter(e.target.value)}
-                className="w-full bg-white border border-[#D1D1CF] p-2 text-xs font-semibold uppercase focus:outline-none"
-              >
-                <option value="All">All Plans</option>
-                <option value="Starter POS">Starter POS</option>
-                <option value="Growth POS">Growth POS</option>
-                <option value="Multi-Branch POS">Multi-Branch POS</option>
-                <option value="Enterprise Commerce">Enterprise Commerce</option>
-              </select>
-            </div>
-
-            <div className="md:col-span-2 space-y-1">
-              <span className="text-gray-500 uppercase text-[9px] font-bold">Filter Cycles:</span>
-              <select
-                value={matrixCycleFilter}
-                onChange={(e) => setMatrixCycleFilter(e.target.value)}
-                className="w-full bg-white border border-[#D1D1CF] p-2 text-xs font-semibold uppercase focus:outline-none"
-              >
-                <option value="All">All Cycles</option>
-                <option value="Monthly">Monthly</option>
-                <option value="Quarterly">Quarterly</option>
-                <option value="Yearly">Yearly</option>
-              </select>
-            </div>
-
-          </div>
-
-          {/* ACTIVE GRID */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {activeMatrixData.length === 0 ? (
-              <div className="col-span-full bg-white border-2 border-dashed border-[#D1D1CF] p-12 text-center font-mono text-xs text-gray-400 uppercase font-black">
-                NO ACTIVE BINDINGS MATCH THE SELECTED MATRIX FILTERS
-              </div>
-            ) : (
-              activeMatrixData.map((lic: POSLicense) => {
-                const linkedVendor = vendors.find(v => v.name === lic.vendorName);
-                return (
-                  <div 
-                    key={lic.id} 
-                    className={`bg-white border-2 shadow-sm font-mono text-xs flex flex-col justify-between hover:scale-[1.01] transition-transform ${
-                      lic.status === 'Active' ? 'border-[#1A1A1A]' : 'border-[#D1D1CF] opacity-75'
-                    }`}
-                  >
-                    
-                    {/* Card Header */}
-                    <div className="p-4 border-b border-[#D1D1CF] bg-[#F4F4F1] flex justify-between items-start">
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] text-[#FF5A00] font-black uppercase tracking-wider block">
-                          {lic.planName || 'Standard POS'}
-                        </span>
-                        <h3 className="text-sm font-black text-[#1A1A1A] uppercase font-sans tracking-wide">
-                          {lic.vendorName}
-                        </h3>
-                      </div>
-                      <span className={`px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest ${
-                        lic.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {lic.status}
-                      </span>
-                    </div>
-
-                    {/* Card Details */}
-                    <div className="p-4 space-y-3.5 flex-1">
-                      
-                      {/* Cryptographic Key Box */}
-                      <div className="space-y-1">
-                        <span className="text-[8px] text-gray-400 uppercase font-bold block">Digital Signature Token</span>
-                        <div className="bg-gray-50 border border-dotted border-gray-300 p-2 font-mono text-[10px] font-bold text-gray-700 flex items-center justify-between select-all">
-                          <span>{lic.licenseKey}</span>
-                          <Key className="w-3.5 h-3.5 text-[#FF5A00]" />
-                        </div>
-                      </div>
-
-                      {/* Detail specs */}
-                      <div className="grid grid-cols-2 gap-2 text-[10px] pt-1">
-                        <div className="space-y-0.5">
-                          <span className="text-gray-400 uppercase block text-[8px]">Billing Term</span>
-                          <span className="font-bold text-[#1A1A1A] uppercase block">
-                            {lic.billingCycle || 'Yearly'} Cycle
-                          </span>
-                        </div>
-                        <div className="space-y-0.5">
-                          <span className="text-gray-400 uppercase block text-[8px]">Term Net Price</span>
-                          <span className="font-bold text-emerald-700 block">
-                            ${lic.tokenPrice ? lic.tokenPrice.toLocaleString() : '1,238'}.00
-                          </span>
-                        </div>
-                        <div className="space-y-0.5 mt-1.5">
-                          <span className="text-gray-400 uppercase block text-[8px]">Expiration</span>
-                          <span className="font-bold text-gray-600 block flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-gray-400" />
-                            {lic.expiryDate || '2027-01-15'}
-                          </span>
-                        </div>
-                        <div className="space-y-0.5 mt-1.5">
-                          <span className="text-gray-400 uppercase block text-[8px]">Linked RPN Ingress</span>
-                          <span className="font-bold text-blue-700 block uppercase truncate">
-                            {linkedVendor?.linkedRpnName ? (
-                              <span className="flex items-center gap-1 text-blue-600">
-                                <Network className="w-3 h-3" />
-                                {linkedVendor.linkedRpnName}
-                              </span>
-                            ) : 'Unassigned route'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Collection Tags */}
-                      {lic.collectionTag && (
-                        <div className="pt-2 border-t border-gray-100 flex items-center space-x-1">
-                          <Tag className="w-3 h-3 text-gray-400 shrink-0" />
-                          <span className="text-[9px] text-gray-500 font-extrabold uppercase">
-                            CLUSTER: {lic.collectionTag}
-                          </span>
-                        </div>
-                      )}
-
-                    </div>
-
-                    {/* Card Actions */}
-                    <div className="p-4 border-t border-[#D1D1CF] bg-[#F9F9F8] flex items-center justify-between gap-2">
-                      <button
-                        onClick={() => handleOpenHistory(lic)}
-                        className="text-[10px] uppercase font-bold text-gray-500 hover:text-black hover:underline cursor-pointer"
-                      >
-                        Audit History
-                      </button>
-
-                      {lic.status === 'Active' ? (
-                        <button
-                          onClick={() => handleSuspend(lic)}
-                          className="bg-[#1A1A1A] hover:bg-[#FF5A00] text-white py-1 px-3 text-[10px] uppercase font-black tracking-wide rounded-none cursor-pointer"
-                        >
-                          Suspend Token
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleRenew(lic)}
-                          className="bg-green-700 hover:bg-[#1A1A1A] text-white py-1 px-3 text-[10px] uppercase font-black tracking-wide rounded-none cursor-pointer"
-                        >
-                          Re-Activate
-                        </button>
-                      )}
-                    </div>
-
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-        </div>
-      )}
-
-
-      {/* ==========================================================================
-         D. VIEW: TAB 4 - RPN VENDOR INGRESS ROUTING LINKER
-         ========================================================================== */}
-      {activeTab === 'rpn-linker' && (
-        <div id="subview_rpn_linker" className="space-y-6 animate-fade-in">
-          
-          {/* NET DIAGRAM AND EXPLANATORY HEADER */}
-          <div className="bg-[#1A1A1A] border-4 border-[#1A1A1A] p-5 text-white shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative overflow-hidden font-mono text-xs">
-            {/* Subtle mesh background design */}
-            <div className="absolute right-0 top-0 bottom-0 w-1/4 bg-[#FF5A00]/10 skew-x-12 translate-x-10" />
-            
-            <div className="space-y-2 max-w-2xl relative z-10">
-              <div className="flex items-center space-x-2 text-[#FF5A00] font-bold text-[10px] uppercase tracking-widest">
-                <span className="w-2 h-2 bg-[#FF5A00] rounded-full animate-pulse" />
-                <span>seiGEN ROUTING PROTOCOLS</span>
-              </div>
-              <h2 className="text-sm font-bold uppercase tracking-wide">
-                RELAY PROCESSING NODE (RPN) GATEWAY CONTROLLER
-              </h2>
-              <p className="text-[11px] text-gray-400 leading-relaxed">
-                Relay Processing Nodes operate co-location databases across world edge locations to synchronize transaction databases under sub-10ms lag. Assigning merchants to explicit RPN agents directs telemetry lanes, isolates ledger queries, and ensures hardware fault compliance.
+          {/* Split controls: Start / Reset sandbox */}
+          <div className="bg-white border-2 border-[#1A1A1A] p-4 flex justify-between items-center">
+            <div>
+              <h3 className="text-xs font-black uppercase text-gray-800">Sandbox Environment Control</h3>
+              <p className="text-[9px] text-gray-500 font-medium font-sans mt-0.5 normal-case">
+                Boot simulated prototype networks to run license validation checks under localOnly constraints.
               </p>
             </div>
 
-            <div className="shrink-0 flex space-x-4 bg-[#2D2D2D] p-3 border border-white/10 z-10 text-[10px]">
-              <div className="space-y-1">
-                <span className="text-gray-400 block uppercase text-[8px]">TOTAL ACTIVE NODES</span>
-                <span className="font-extrabold text-white block text-sm">{rpnAgents.filter(r => r.connectionStatus !== 'Offline').length} / {rpnAgents.length}</span>
-              </div>
-              <div className="border-l border-white/10 pl-4 space-y-1">
-                <span className="text-gray-400 block uppercase text-[8px]">TOTAL TUNNEL THREADS</span>
-                <span className="font-extrabold text-[#FF5A00] block text-sm">
-                  {vendors.filter(v => v.linkedRpnId).length} MERCHANT LINKS
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            {/* LEFT DUAL COLUMN (8 of 12 spans) - LISTS OF ACTIVE RPN AGENT SHIELDS */}
-            <div className="lg:col-span-8 space-y-6">
-              
-              <div className="bg-white border-2 border-[#1A1A1A] shadow-sm">
-                
-                {/* Panel Header */}
-                <div className="p-4 border-b border-[#D1D1CF] bg-[#F4F4F1] flex justify-between items-center text-xs font-mono text-gray-500">
-                  <span className="uppercase text-[#1A1A1A] font-bold">CO-LOCATION RPN ROUTING NODE STATUS</span>
-                  <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2 py-0.5 uppercase">
-                    ONLINE ROUTER DAEMONS
-                  </span>
-                </div>
-
-                {/* Nodes list */}
-                <div className="divide-y divide-[#D1D1CF] font-mono text-xs">
-                  {rpnRoutingData.map((node) => (
-                    <div key={node.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-gray-50 transition-all">
-                      
-                      {/* Name / Region */}
-                      <div className="space-y-1.5 max-w-sm">
-                        <div className="flex items-center space-x-2">
-                          <Globe className="w-4 h-4 text-blue-600" />
-                          <span className="font-bold text-[#1A1A1A] text-sm">{node.name}</span>
-                          <span className="bg-gray-100 text-gray-500 text-[8px] px-1 font-bold">{node.id}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-500 flex items-center space-x-2">
-                          <span>REGION: {node.region}</span>
-                          <span>•</span>
-                          <span>RATE: {node.throughput}</span>
-                        </div>
-                      </div>
-
-                      {/* Linked merchants */}
-                      <div className="flex-1 px-0 md:px-6 space-y-1">
-                        <span className="text-[9px] text-gray-400 uppercase font-bold block">
-                          Currently Linked Tunnel Routes ({node.merchants.length}):
-                        </span>
-                        {node.merchants.length === 0 ? (
-                          <span className="text-gray-400 italic text-[10px]">No active merchants mapped</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {node.merchants.map((merchant: Vendor) => (
-                              <span 
-                                key={merchant.id} 
-                                className="bg-blue-50 border border-blue-200 text-blue-700 px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded-sm inline-flex items-center space-x-1"
-                              >
-                                <span>{merchant.name}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUnlinkVendor(merchant.id)}
-                                  className="text-red-500 hover:text-red-700 ml-1 font-black"
-                                  title="Sever Secure Tunnel Route"
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Status / Active Sessions count */}
-                      <div className="text-right shrink-0 space-y-1">
-                        <div className="flex items-center justify-end space-x-1.5">
-                          <span className={`w-2 h-2 rounded-full ${
-                            node.connectionStatus === 'Connected' ? 'bg-green-500 animate-pulse' :
-                            node.connectionStatus === 'Standby' ? 'bg-amber-400' : 'bg-red-500'
-                          }`} />
-                          <span className="font-bold uppercase text-[10px]">{node.connectionStatus}</span>
-                        </div>
-                        <div className="text-[9px] text-gray-400 uppercase">
-                          {node.activeSessions.toLocaleString()} ACTIVE SESSIONS
-                        </div>
-                      </div>
-
-                    </div>
-                  ))}
-                </div>
-
-              </div>
-
-              {/* ACTIVE PHYSICAL TUNNEL ANIMATION MAPPING LAYOUT */}
-              <div className="bg-white border-2 border-[#1A1A1A] p-6 shadow-sm space-y-4 font-mono text-xs">
-                <span className="text-gray-400 uppercase text-[9px] font-bold block">ACTIVE ROUTING LANES FLOW VISUALIZATION</span>
-                
-                <div className="space-y-4 max-h-60 overflow-y-auto pr-2 divide-y divide-gray-100">
-                  {vendors.filter(v => v.linkedRpnId).length === 0 ? (
-                    <div className="text-center p-8 text-gray-400 italic">No operational network tunnels active. Use the form on the right to link a merchant.</div>
-                  ) : (
-                    vendors.filter(v => v.linkedRpnId).map((v: Vendor) => {
-                      const linkedRpn = rpnAgents.find(r => r.id === v.linkedRpnId);
-                      return (
-                        <div key={v.id} className="pt-3 pb-1 flex items-center justify-between text-[11px] hover:bg-gray-50/50">
-                          <div className="flex items-center space-x-2 shrink-0 w-1/3">
-                            <Building className="w-3.5 h-3.5 text-[#FF5A00]" />
-                            <span className="font-black text-[#1A1A1A] truncate">{v.name}</span>
-                          </div>
-
-                          {/* Visual dotted connection animation block */}
-                          <div className="flex-1 flex items-center justify-center px-4 relative">
-                            <div className="w-full border-t border-dashed border-blue-300 relative">
-                              <span className="absolute top-[-8px] left-1/2 -translate-x-1/2 bg-blue-100 text-blue-700 border border-blue-300 font-bold px-1.5 py-0.2 text-[7px] uppercase tracking-widest rounded-full animate-pulse">
-                                SECURE TLS 1.3
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center space-x-2 shrink-0 justify-end w-1/3 text-right">
-                            <span className="font-black text-blue-700">{linkedRpn?.name || 'Frankfurt-Alpha'}</span>
-                            <Network className="w-3.5 h-3.5 text-blue-600" />
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* RIGHT COLUMN (4 of 12 spans) - ACTIONS TUNNEL LINKER FORM */}
-            <div className="lg:col-span-4 space-y-6">
-              <div className="bg-white border-2 border-[#1A1A1A] p-6 shadow-sm font-mono text-xs space-y-6">
-                
-                <div className="border-b border-[#D1D1CF] pb-4">
-                  <div className="flex items-center space-x-2">
-                    <Link2 className="w-5 h-5 text-[#FF5A00]" />
-                    <span className="font-bold uppercase tracking-wider text-[#1A1A1A]">MAP MERCHANT ROUTE</span>
-                  </div>
-                  <p className="text-[9px] text-gray-400 uppercase mt-0.5">ESTABLISH CRYPTO INGRESS TUNNEL</p>
-                </div>
-
-                <form onSubmit={handleLinkRPN} className="space-y-4">
-                  
-                  {/* SELECT MERCHANT */}
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Select Active Merchant</label>
-                    <select
-                      value={linkerVendorId}
-                      onChange={(e) => setLinkerVendorId(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs font-semibold uppercase focus:outline-none"
-                    >
-                      {vendors.map((v: Vendor) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name} ({v.id}) [{v.linkedRpnId ? 'ROUTED' : 'UNROUTED'}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* SELECT RPN TARGET */}
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Select Ingress Node Target</label>
-                    <select
-                      value={linkerRpnId}
-                      onChange={(e) => setLinkerRpnId(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs font-semibold uppercase focus:outline-none"
-                    >
-                      <option value="">-- Clear Operational Node Route --</option>
-                      {rpnAgents.map((r: RPNAgent) => (
-                        <option key={r.id} value={r.id} disabled={r.connectionStatus === 'Offline'}>
-                          {r.name} ({r.id}) — {r.connectionStatus}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* SELECT PROTOCOL */}
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Tunnel Encryption Suite</label>
-                    <select
-                      value={linkerProtocol}
-                      onChange={(e) => setLinkerProtocol(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs font-semibold uppercase focus:outline-none"
-                    >
-                      <option value="TLS 1.3 / ECDHE-RSA">TLS 1.3 / ECDHE-RSA (Standard)</option>
-                      <option value="SHA256 Encrypted Packet Tunnel">SHA256 / AES-256 Symmetric</option>
-                      <option value="AES-256 SSH Socket Tunnel">SSH Port Forwarding</option>
-                      <option value="Quantum Resistant Kyber VPN">Kyber PQC VPN (Enterprise)</option>
-                    </select>
-                  </div>
-
-                  {/* LATENCY TARGET THRESHOLD */}
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">SLA Latency Constraint</label>
-                    <select
-                      value={linkerLatencyLimit}
-                      onChange={(e) => setLinkerLatencyLimit(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs font-semibold uppercase focus:outline-none"
-                    >
-                      <option value="10ms">Sub-10ms Fast-path</option>
-                      <option value="25ms">Sub-25ms Co-location Standard</option>
-                      <option value="50ms">Sub-50ms Normal SLA</option>
-                      <option value="100ms">Sub-100ms Fallback Core</option>
-                    </select>
-                  </div>
-
-                  {/* NOTICE */}
-                  <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-[10px] text-blue-800 leading-relaxed">
-                    Establishing links configures routing queues and generates co-location cache indices. Traffic is isolated to this selected node.
-                  </div>
-
-                  {/* SUBMIT BUTTON */}
-                  {linkerProcessState === 'processing' ? (
-                    <div className="bg-[#1A1A1A] text-[#FF5A00] p-3 text-center text-[10px] font-bold uppercase tracking-widest flex items-center justify-center space-x-2">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#FF5A00]" />
-                      <span>TUNNEL CRYPTO NEGOTIATION...</span>
-                    </div>
-                  ) : linkerProcessState === 'success' ? (
-                    <div className="bg-green-700 text-white p-3 text-center text-[10px] font-bold uppercase flex items-center justify-center space-x-2">
-                      <Check className="w-4 h-4 text-white" />
-                      <span>ROUTE COMMITTED</span>
-                    </div>
-                  ) : (
-                    <button
-                      type="submit"
-                      className="w-full bg-[#FF5A00] hover:bg-[#1A1A1A] text-white py-2.5 uppercase font-bold text-center tracking-wider transition-colors rounded-none cursor-pointer mt-2"
-                    >
-                      Establish Ingress Link
-                    </button>
-                  )}
-
-                </form>
-
-              </div>
-            </div>
-
-          </div>
-
-        </div>
-      )}
-
-
-      {/* ==========================================================================
-         POS ACTIVATION BRIDGE DRAWER
-         ========================================================================== */}
-      {isActivationDrawerOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex justify-end z-50 font-mono text-xs">
-          <div className="absolute inset-0" onClick={() => setIsActivationDrawerOpen(false)} />
-          
-          <div className="bg-white border-l-4 border-[#1A1A1A] w-full max-w-md h-full relative z-10 flex flex-col justify-between shadow-2xl p-6 animate-slide-in overflow-y-auto">
-            <div>
-              <div className="flex justify-between items-center border-b border-[#D1D1CF] pb-4">
-                <div className="flex items-center space-x-2">
-                  <Terminal className="w-5 h-5 text-[#FF5A00]" />
-                  <h2 className="text-sm font-bold uppercase text-[#1A1A1A]">ISSUE POS ACTIVATION BRIDGE</h2>
-                </div>
-                <button 
-                  onClick={() => setIsActivationDrawerOpen(false)} 
-                  className="text-gray-400 hover:text-black border border-transparent hover:border-black p-1 transition-all cursor-pointer"
-                >
-                  <X className="w-4.5 h-4.5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleActivationSubmit} className="space-y-4 mt-6">
-                
-                {/* Vendor select */}
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Select Vendor Merchant</label>
-                  <select
-                    required
-                    value={actVendorId}
-                    onChange={(e) => setActVendorId(e.target.value)}
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                  >
-                    <option value="" disabled>-- Choose Registered Vendor --</option>
-                    {vendors.map((v: Vendor) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name} ({v.id}) [{v.status}]
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Plan select */}
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Billing Plan Slabs</label>
-                  <select
-                    required
-                    value={actPlanId}
-                    onChange={(e) => setActPlanId(e.target.value)}
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                  >
-                    <option value="" disabled>-- Choose Connected Plan --</option>
-                    {plans.map((p: Plan) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* License Mode Selector */}
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">License Mode</label>
-                  <select
-                    required
-                    value={actLicenseMode}
-                    onChange={(e) => setActLicenseMode(e.target.value as any)}
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase font-bold"
-                  >
-                    <option value="production">PRODUCTION / CLOUD</option>
-                    <option value="demo">DEMO / LOCAL ONLY</option>
-                  </select>
-                </div>
-
-                {/* Storage Mode Selector */}
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Storage Mode</label>
-                  <select
-                    required
-                    disabled
-                    value={actStorageMode}
-                    className="w-full bg-[#EAEAE8]/60 border border-[#D1D1CF] p-2.5 text-xs text-gray-500 rounded-none cursor-not-allowed uppercase font-semibold"
-                  >
-                    <option value="cloud">CLOUD INSTANCE</option>
-                    <option value="localOnly">LOCAL ONLY (STORAGE MODE DIRECTORY)</option>
-                  </select>
-                  <p className="text-[9px] text-gray-400">
-                    {actLicenseMode === 'demo' 
-                      ? '※ Demo licenses are strictly restricted to localOnly storage mode.' 
-                      : '※ Production licenses are strictly routed via cloud storage mode.'}
-                  </p>
-                </div>
-
-                {/* Start Date and Expiry Date */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Start Date</label>
-                    <input
-                      type="date"
-                      required
-                      value={actStartDate}
-                      onChange={(e) => setActStartDate(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none rounded-none font-semibold"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Expiry Date</label>
-                    <input
-                      type="date"
-                      required
-                      value={actExpiryDate}
-                      onChange={(e) => setActExpiryDate(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none rounded-none font-semibold"
-                    />
-                  </div>
-                </div>
-
-                {/* Custom Capacity Limits Grid */}
-                <div className="grid grid-cols-2 gap-3 bg-gray-50 p-3 border border-[#D1D1CF]">
-                  <div className="text-[9px] font-bold text-gray-700 uppercase col-span-2 border-b border-[#D1D1CF] pb-1">
-                    Dynamic Threshold Resource Allocations
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Branches</label>
-                    <input
-                      type="text"
-                      required
-                      value={actMaxBranches}
-                      onChange={(e) => setActMaxBranches(e.target.value)}
-                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Terminals</label>
-                    <input
-                      type="text"
-                      required
-                      value={actMaxTerminals}
-                      onChange={(e) => setActMaxTerminals(e.target.value)}
-                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Staff</label>
-                    <input
-                      type="text"
-                      required
-                      value={actMaxStaff}
-                      onChange={(e) => setActMaxStaff(e.target.value)}
-                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[8px] block font-bold">Max Products</label>
-                    <input
-                      type="text"
-                      required
-                      value={actMaxProducts}
-                      onChange={(e) => setActMaxProducts(e.target.value)}
-                      className="w-full bg-white border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                {/* Provisioning Notes */}
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Provisioning Notes</label>
-                  <textarea
-                    rows={2}
-                    value={actNotes}
-                    onChange={(e) => setActNotes(e.target.value)}
-                    placeholder="Describe specific TPM bonding requests..."
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs focus:outline-none focus:border-[#FF5A00]"
-                  />
-                </div>
-
-                <div className="bg-orange-50 border-l-4 border-[#FF5A00] p-3 text-[10px] text-orange-850 leading-relaxed font-sans">
-                  <strong>ACTIVATION BRIDGE REGISTRY:</strong> This registers a mock authorization record on the validation stack.
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-[#FF5A00] hover:bg-[#1A1A1A] text-white py-3 uppercase font-bold text-center tracking-wider transition-colors rounded-none cursor-pointer mt-2"
-                >
-                  Confirm and Authorize Activation
-                </button>
-              </form>
-            </div>
-
-            <button
-              onClick={() => setIsActivationDrawerOpen(false)}
-              className="w-full bg-white border border-[#D1D1CF] text-gray-700 py-2.5 uppercase font-bold text-center tracking-wide hover:bg-gray-100 transition-colors rounded-none cursor-pointer mt-4"
-            >
-              Cancel Operation
-            </button>
-          </div>
-        </div>
-      )}
-
-
-      {/* ==========================================================================
-         E. MODAL/DRAWER DIALOGS COMPONENT SECTION
-         ========================================================================== */}
-      {isDrawerOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex justify-end z-50 font-mono text-xs">
-          <div className="absolute inset-0" onClick={() => setIsDrawerOpen(false)} />
-          
-          <div className="bg-white border-l-4 border-[#1A1A1A] w-full max-w-md h-full relative z-10 flex flex-col justify-between shadow-2xl p-6 animate-slide-in">
-            <div>
-              <div className="flex justify-between items-center border-b border-[#D1D1CF] pb-4">
-                <div className="flex items-center space-x-2">
-                  <Terminal className="w-5 h-5 text-[#FF5A00]" />
-                  <h2 className="text-sm font-bold uppercase text-[#1A1A1A]">ISSUE POS TERMINAL KEY</h2>
-                </div>
-                <button 
-                  onClick={() => setIsDrawerOpen(false)} 
-                  className="text-gray-400 hover:text-black border border-transparent hover:border-black p-1 transition-all cursor-pointer"
-                >
-                  <X className="w-4.5 h-4.5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleIssueSubmit} className="space-y-4 mt-6">
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Select Vendor Merchant</label>
-                  <select
-                    required
-                    value={formVendorId}
-                    onChange={(e) => setFormVendorId(e.target.value)}
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                  >
-                    <option value="" disabled>-- Choose Registered Vendor --</option>
-                    {vendors.map((v: Vendor) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name} ({v.id}) [{v.status}]
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Billing / Slabs Plan</label>
-                  <select
-                    required
-                    value={formPlanId}
-                    onChange={(e) => setFormPlanId(e.target.value)}
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                  >
-                    <option value="" disabled>-- Choose Connected Plan --</option>
-                    {plans.map((p: Plan) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} (${p.price}/{p.interval === 'Monthly' ? 'Mo' : 'Yr'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Start Date</label>
-                    <input
-                      type="date"
-                      required
-                      value={formStartDate}
-                      onChange={(e) => setFormStartDate(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-gray-500 uppercase text-[9px] block font-bold">Expiry Date</label>
-                    <input
-                      type="date"
-                      required
-                      value={formExpiryDate}
-                      onChange={(e) => setFormExpiryDate(e.target.value)}
-                      className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FF5A00] rounded-none font-semibold uppercase"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-gray-500 uppercase text-[9px] block font-bold">Provisioning Notes</label>
-                  <textarea
-                    rows={3}
-                    value={formNotes}
-                    onChange={(e) => setFormNotes(e.target.value)}
-                    placeholder="Describe specific TPM bonding requests..."
-                    className="w-full bg-[#F4F4F1] border border-[#D1D1CF] p-2 text-xs focus:outline-none focus:border-[#FF5A00]"
-                  />
-                </div>
-
-                <div className="bg-orange-50 border-l-4 border-[#FF5A00] p-3 text-[10px] text-orange-800 leading-relaxed">
-                  <strong>SYSTEM NOTICE:</strong> Submitting issues and signs a cryptographic hash key. This binds one terminal capacity unit inside the transaction registry.
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-[#FF5A00] hover:bg-[#1A1A1A] text-white py-3 uppercase font-bold text-center tracking-wider transition-colors rounded-none cursor-pointer mt-4"
-                >
-                  Confirm and Authorize Key
-                </button>
-              </form>
-            </div>
-
-            <button
-              onClick={() => setIsDrawerOpen(false)}
-              className="w-full bg-white border border-[#D1D1CF] text-gray-700 py-2.5 uppercase font-bold text-center tracking-wide hover:bg-gray-100 transition-colors rounded-none cursor-pointer"
-            >
-              Cancel Operation
-            </button>
-          </div>
-        </div>
-      )}
-
-
-      {/* AUDIT TIMELINE HISTORY MODAL */}
-      {isHistoryOpen && selectedLicense && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center z-50 p-4 font-mono text-xs animate-fade-in">
-          <div className="bg-white border-4 border-[#1A1A1A] w-full max-w-lg p-6 relative rounded-none shadow-2xl max-h-[85vh] overflow-y-auto space-y-4">
-            
-            <button 
-              onClick={() => {
-                setIsHistoryOpen(false);
-                setSelectedLicense(null);
-              }} 
-              className="absolute top-4 right-4 text-gray-500 hover:text-black hover:border border-black p-0.5 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center space-x-2 border-b border-[#D1D1CF] pb-3">
-              <History className="w-5 h-5 text-[#FF5A00]" />
-              <div>
-                <h2 className="text-sm font-bold uppercase text-[#1A1A1A]">AUDIT TIMELINE REGISTRY</h2>
-                <span className="text-[10px] text-gray-400 uppercase">License: {selectedLicense.id} ({selectedLicense.terminalId})</span>
-              </div>
-            </div>
-
-            <div className="bg-[#F4F4F1] border border-[#D1D1CF] p-3 space-y-1 text-[11px]">
-              <div><strong>Merchant Vendor:</strong> {selectedLicense.vendorName}</div>
-              <div><strong>Active Cryptographic Key:</strong> {selectedLicense.licenseKey}</div>
-              <div><strong>Slab Plan Model:</strong> {selectedLicense.planName || 'Starter POS'}</div>
-              <div><strong>Expiration Signature:</strong> {selectedLicense.expiryDate || 'N/A'}</div>
-              {selectedLicense.collectionTag && (
-                <div><strong>Collections Cluster:</strong> {selectedLicense.collectionTag}</div>
-              )}
-              {selectedLicense.notes && (
-                <div className="mt-2 text-gray-600 border-t border-gray-200 pt-1">
-                  <strong>Notes:</strong> {selectedLicense.notes}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <span className="text-[9px] text-gray-400 font-bold uppercase block tracking-wider">CHRONOLOGICAL PROTOCOL STREAM</span>
-              
-              {filteredAuditTimeline.length === 0 ? (
-                <div className="border border-dashed border-[#D1D1CF] p-6 text-center text-gray-400 uppercase font-semibold text-[10px]">
-                  NO SPECIFIC AUDIT ENTRIES LOGGED FOR THIS LICENSE ROUTE YET.
-                </div>
-              ) : (
-                <div className="space-y-4 relative before:absolute before:bottom-0 before:top-2 before:left-3 before:w-0.5 before:bg-[#D1D1CF]">
-                  {filteredAuditTimeline.map((log: any) => (
-                    <div key={log.id} className="relative pl-7 space-y-0.5">
-                      <span className="absolute left-1.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white bg-[#FF5A00] shadow-sm transform -translate-x-1/2"></span>
-                      
-                      <div className="flex justify-between items-center text-[10px] text-gray-400">
-                        <span>{new Date(log.timestamp).toLocaleString()}</span>
-                        <span className="bg-[#1A1A1A] text-white px-1.5 font-bold uppercase text-[8px]">{log.id}</span>
-                      </div>
-                      
-                      <div className="font-bold text-[#1A1A1A] uppercase tracking-wide">
-                        {log.action.replace(/_/g, ' ')}
-                      </div>
-                      
-                      <div className="text-gray-600 text-[11px] leading-relaxed">
-                        Actor <strong>{log.actor}</strong> committed target route <em>"{log.target}"</em> with status <span className="text-green-700 font-semibold">{log.status}</span>.
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="pt-2">
+            <div className="flex space-x-2 text-[9px] font-black uppercase">
               <button
                 type="button"
-                onClick={() => {
-                  setIsHistoryOpen(false);
-                  setSelectedLicense(null);
-                }}
-                className="w-full bg-[#1A1A1A] text-white py-2.5 uppercase font-bold text-center tracking-wide hover:bg-[#FF5A00] transition-colors rounded-none cursor-pointer"
+                onClick={handleStartDemo}
+                className="bg-[#FF5A00] text-white hover:bg-[#1A1A1A] border border-transparent px-3 py-2 cursor-pointer transition-colors"
               >
-                Close Audit View
+                Boot Demo Sandbox
+              </button>
+              <button
+                type="button"
+                onClick={handleResetDemo}
+                className="bg-white border border-[#1A1A1A] hover:bg-red-650 hover:text-white hover:border-transparent px-3 py-2 cursor-pointer transition-colors"
+              >
+                Purge Sandbox Logs
               </button>
             </div>
           </div>
+
+          {/* Double column grid for Demos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* Demo Vendors list */}
+            <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-3">
+              <div className="border-b border-[#D1D1CF] pb-2 text-[#FF5A00] font-black uppercase text-[10px] flex justify-between items-center">
+                <span>Demo Sandbox Vendors ({demoVendorsList.length})</span>
+                <span className="bg-orange-100 text-orange-950 text-[7px] px-1 border border-orange-200 font-sans">DEMO ONLY</span>
+              </div>
+
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 text-[9px] font-bold">
+                {demoVendorsList.length === 0 ? (
+                  <div className="text-[9px] text-gray-400 italic uppercase">No active sandbox vendor nodes.</div>
+                ) : (
+                  demoVendorsList.map(v => (
+                    <div key={v.id} className="bg-orange-50/20 border border-orange-200 p-3 flex justify-between items-center rounded-none">
+                      <div>
+                        <div className="text-gray-900 font-black">{v.name} ({v.id})</div>
+                        <div className="text-gray-400 text-[8px] font-medium font-sans normal-case mt-0.5">
+                          Uplink Location: {v.city || 'Localhost'} • Storage: {v.storageMode || 'localOnly'}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleConvertDemoToPaid(v)}
+                        className="bg-white border border-[#1A1A1A] hover:bg-[#FF5A00] hover:text-white px-2 py-1 text-[8px] font-black uppercase cursor-pointer"
+                      >
+                        Convert to Paid
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Demo Licenses list */}
+            <div className="bg-white border-2 border-[#1A1A1A] p-4 space-y-3">
+              <div className="border-b border-[#D1D1CF] pb-2 text-[#FF5A00] font-black uppercase text-[10px] flex justify-between items-center">
+                <span>Demo Sandbox Licenses ({demoLicensesList.length})</span>
+                <span className="bg-orange-100 text-orange-950 text-[7px] px-1 border border-orange-200 font-sans">LOCAL ONLY</span>
+              </div>
+
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 text-[9px] font-bold font-mono">
+                {demoLicensesList.length === 0 ? (
+                  <div className="text-[9px] text-gray-400 italic uppercase">No sandbox licenses active.</div>
+                ) : (
+                  demoLicensesList.map(l => (
+                    <div key={l.id} className="bg-orange-50/20 border border-orange-200 p-3 space-y-1 rounded-none">
+                      <div className="flex justify-between items-center text-[8px]">
+                        <span className="text-[#FF5A00] font-black font-mono">ID: {l.id}</span>
+                        <span className="text-gray-400 font-sans normal-case font-medium">{l.expiryDate}</span>
+                      </div>
+                      <div className="text-gray-800">{l.vendorName}</div>
+                      <div className="text-gray-400 text-[8.5px] font-bold uppercase tracking-widest break-all font-mono">
+                        KEY: {l.licenseKey}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* ISSUE LICENSE DIALOG */}
+      {isIssueModalOpen && (
+        <div className="fixed inset-0 z-50 bg-[#111111]/40 flex items-center justify-center p-4">
+          <form onSubmit={handleIssueLicense} className="bg-white border-4 border-[#1A1A1A] p-6 max-w-sm w-full text-left space-y-4 shadow-2xl relative font-mono text-[#1A1A1A]">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#FF5A00]" />
+            <h3 className="font-sans font-black text-sm uppercase border-b border-[#D1D1CF] pb-2">
+              Issue POS terminal License
+            </h3>
+
+            <div className="space-y-3 text-[9px] font-bold text-gray-500">
+              <div className="space-y-1">
+                <label className="uppercase">Select Target Vendor</label>
+                <select
+                  value={issueVendorId}
+                  onChange={(e) => setIssueVendorId(e.target.value)}
+                  className="w-full bg-white border border-[#D1D1CF] p-2 focus:outline-none text-[10px] font-bold cursor-pointer"
+                >
+                  {unlicensedVendors.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} ({v.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="uppercase">Select Subscription Plan</label>
+                <select
+                  value={issuePlanId}
+                  onChange={(e) => setIssuePlanId(e.target.value)}
+                  className="w-full bg-white border border-[#D1D1CF] p-2 focus:outline-none text-[10px] font-bold cursor-pointer"
+                >
+                  {plans.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-[#D1D1CF] flex justify-end space-x-2 text-[10px] font-black uppercase">
+              <button
+                type="button"
+                onClick={() => setIsIssueModalOpen(false)}
+                className="px-3 py-1.5 border border-stone-250 hover:bg-stone-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-3 py-1.5 bg-[#FF5A00] text-white hover:bg-[#1A1A1A] transition-colors cursor-pointer"
+              >
+                Generate Key
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
