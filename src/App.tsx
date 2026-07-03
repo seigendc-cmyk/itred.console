@@ -1874,7 +1874,7 @@ function RequireAuthLayout() {
    ========================================================================== */
 
 function DashboardRoute() {
-  const { computedStats, auditLogs, vendors } = useLifecycle();
+  const { computedStats, auditLogs, vendors, activeStaffSession } = useLifecycle();
   const navigate = useNavigate();
 
   return (
