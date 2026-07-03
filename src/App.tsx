@@ -1292,6 +1292,7 @@ function RequireAuthLayout() {
     internalStaff,
     staffRoles,
     staffDesks,
+    handleResetState,
 
     // SCI Workspace states and modifiers
     envMode,
