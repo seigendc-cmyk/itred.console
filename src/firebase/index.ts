@@ -7,4 +7,5 @@ export * from "./auth";
 export * from "./repositories";
 export * from "./diagnostics";
 export * from "./mode";
+export * from "./gateway";
 
